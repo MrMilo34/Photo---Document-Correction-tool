@@ -1,11 +1,24 @@
-# DocMesh v0.5
+# DocMesh v0.5.1
 
-## v0.5 changes
-- Added a new **AI Assisted** mode with more aggressive cleanup.
-- The previous cleanup result is now the standard **Corrected** mode.
-- Reordered the result modes to: **Adjust, Greyscale, Corrected, AI Assisted**.
-- Renamed **B&W** to **Greyscale**.
+This is a cache-reliability hotfix for v0.5.
 
-## GitHub update
-Replace the existing repository files with the contents of this package and commit the changes.
-Because the service worker cache was updated, refresh the site after deployment and reopen the installed app if needed.
+## Included app changes
+- Result order: **Adjust, Greyscale, Corrected, AI Assisted**
+- **Corrected** uses the balanced cleanup pass.
+- **AI Assisted** uses the stronger cleanup pass.
+- New DocMesh splash screen.
+- Neon pink corner points and purple-blue edge points.
+
+## v0.5.1 cache fix
+GitHub Pages + the previous offline service worker could continue serving the older app after a normal refresh.
+
+This build:
+- uses versioned app asset URLs,
+- forces the service worker update check,
+- uses a network-first strategy when online,
+- removes older DocMesh caches after activation.
+
+## Upload
+Replace the existing repository files with the contents of this package, including the `assets` folder.
+
+After GitHub Pages finishes deploying, open the normal site once. If the old app is still visible on that first load, close the tab/app and reopen it once more so the new service worker takes control.

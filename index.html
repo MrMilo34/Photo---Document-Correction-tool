@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>DocMesh</title>
-  <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest?v=0.5.1" />
+  <link rel="icon" href="icons/icon-192.png?v=0.5.1" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=0.5.1" />
+  <link rel="stylesheet" href="styles.css?v=0.5.1" />
 </head>
 <body>
   <header class="topbar">
@@ -23,9 +23,9 @@
   <main>
     <section id="homeView" class="view active home-view">
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png" alt="DocMesh splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=0.5.1" alt="DocMesh splash screen" />
       </div>
-      <div class="version-tag">release v0.5</div>
+      <div class="version-tag">release v0.5.1</div>
 
       <div class="home-actions">
         <label class="primary big-btn">📷 Take Photo
@@ -112,7 +112,7 @@
   </main>
 
   <dialog id="aboutDialog">
-    <h2>DocMesh v0.5</h2>
+    <h2>DocMesh v0.5.1</h2>
     <p>The perimeter points define the real page boundary and the app dewarps the photographed pixels into a flat document.</p>
     <p><strong>AI Assist</strong> now has two cleanup levels: Corrected for balanced cleanup and AI Assisted for a more aggressive pass with stronger shadow reduction and clarity enhancement.</p>
     <p><strong>v0.5:</strong> added the new mode order, renamed B&amp;W to Greyscale, made the balanced cleanup the Corrected view, and added a stronger AI Assisted cleanup mode.</p>
@@ -122,6 +122,6 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=0.5.1"></script>
 </body>
 </html>
