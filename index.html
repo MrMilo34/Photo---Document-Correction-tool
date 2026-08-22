@@ -47,18 +47,23 @@
     </section>
 
     <section id="shapeView" class="view">
-      <div class="stage-wrap">
-        <canvas id="editCanvas"></canvas>
+      <div id="stageWrap" class="stage-wrap">
+        <div id="canvasPan" class="canvas-pan"><div id="canvasZoom" class="canvas-zoom"><canvas id="editCanvas"></canvas></div></div>
         <div id="loupe" class="loupe hidden"><canvas id="loupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
+        <div id="pointActions" class="point-actions hidden" aria-label="Selected point actions">
+          <button id="movePointBtn" class="point-action move" aria-label="Move selected point">↔ <span>Move</span></button>
+          <button id="removePointBtn" class="point-action remove" aria-label="Remove selected point">✕ <span>Remove</span></button>
+        </div>
+        <div id="zoomChip" class="zoom-chip hidden">1.0×</div>
       </div>
-      <div class="hint">Drag any point. Tap an edge to add another point.</div>
-      <div class="toolbar scroll-x">
+      <div class="hint shape-ui">Pinch to zoom. Tap a point for Move / Remove. Tap a line to add a point.</div>
+      <div class="toolbar scroll-x shape-ui">
         <button id="autoBtn">✨ Auto</button>
         <button id="undoPointBtn">↶ Undo Point</button>
         <button id="resetBtn">◇ 4 Points</button>
         <button id="rotateBtn">↻ Rotate</button>
       </div>
-      <button id="correctBtn" class="primary bottom-action">CORRECT DOCUMENT</button>
+      <button id="correctBtn" class="primary bottom-action shape-ui">CORRECT DOCUMENT</button>
     </section>
 
     <section id="resultView" class="view">
@@ -78,9 +83,9 @@
   </main>
 
   <dialog id="aboutDialog">
-    <h2>Document Corrector v0.1</h2>
-    <p>This first build uses deterministic image processing. The perimeter points define the true page boundary; the interior is dewarped from those points using a curved-surface mapping.</p>
-    <p><strong>Tip:</strong> Place extra points anywhere a paper edge bows or curves.</p>
+    <h2>Document Corrector v0.2</h2>
+    <p>Document Corrector uses deterministic image processing. The perimeter points define the true page boundary; the interior is dewarped from those points using a curved-surface mapping.</p>
+    <p><strong>v0.2:</strong> Pinch to zoom, tap existing points to select them, use precision Move / Remove controls, and tap empty edge sections to add new points.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 

@@ -5,6 +5,8 @@ const views = { home: $('homeView'), shape: $('shapeView'), result: $('resultVie
 const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
+const stageWrap = $('stageWrap'), canvasPan = $('canvasPan'), canvasZoom = $('canvasZoom');
+const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), removePointBtn = $('removePointBtn'), zoomChip = $('zoomChip');
 const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -18,8 +20,22 @@ let bwImage = null;
 let currentMode = 'original';
 let history = [];
 let currentFileBase = 'document';
+let selectedIndex = -1;
+let editZoom = 1, panX = 0, panY = 0;
+let gesture = null, pinchState = null, pinchedUntilClear = false;
+const activePointers = new Map();
+let precisionMove = null;
+const SELECT_RADIUS_CSS = 62;
+const EDGE_TAP_RADIUS_CSS = 46;
+const MAX_ZOOM = 5;
 
-function showView(name){ Object.values(views).forEach(v=>v.classList.remove('active')); views[name].classList.add('active'); window.scrollTo(0,0); }
+
+function showView(name){
+  Object.values(views).forEach(v=>v.classList.remove('active'));
+  views[name].classList.add('active');
+  if(name!=='shape') hidePointActions();
+  window.scrollTo(0,0);
+}
 function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2200); }
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -39,6 +55,8 @@ async function loadFile(file){
     setupEditCanvas();
     points = autoDetectDocument();
     history=[];
+    selectedIndex=-1;
+    resetViewport();
     renderEditor();
     showView('shape');
   }catch(err){ console.error(err); toast('Could not open that image.'); }
@@ -120,47 +138,175 @@ function autoDetectDocument(){
 
 function polygonArea(ps){let a=0;for(let i=0;i<ps.length;i++){const p=ps[i],q=ps[(i+1)%ps.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
 
+function applyViewport(showChip=false){
+  if(editZoom<=1.01){editZoom=1;panX=0;panY=0;}
+  canvasPan.style.transform=`translate3d(${panX}px,${panY}px,0)`;
+  canvasZoom.style.transform=`scale(${editZoom})`;
+  views.shape.classList.toggle('focus-edit',editZoom>1.18 || !!precisionMove || (gesture?.type==='point' && gesture.moved));
+  if(showChip || editZoom>1.02){
+    zoomChip.textContent=`${editZoom.toFixed(1)}×`;
+    zoomChip.classList.remove('hidden');
+    clearTimeout(applyViewport._chipTimer);
+    applyViewport._chipTimer=setTimeout(()=>zoomChip.classList.add('hidden'),850);
+  }else zoomChip.classList.add('hidden');
+  updatePointActions();
+}
+function resetViewport(){
+  editZoom=1;panX=0;panY=0;pinchState=null;gesture=null;pinchedUntilClear=false;activePointers.clear();
+  applyViewport(false);
+}
+function clampPan(){
+  if(editZoom<=1.01){panX=0;panY=0;return;}
+  const r=stageWrap.getBoundingClientRect();
+  const mx=r.width*Math.min(2.4,editZoom*.72), my=r.height*Math.min(2.4,editZoom*.72);
+  panX=clamp(panX,-mx,mx);panY=clamp(panY,-my,my);
+}
+function hidePointActions(){pointActions.classList.add('hidden');}
+function selectPoint(index,show=true){
+  if(index<0||index>=points.length){selectedIndex=-1;hidePointActions();return;}
+  selectedIndex=index;renderEditor();
+  if(show){pointActions.classList.remove('hidden');updatePointActions();}
+}
+function updatePointActions(){
+  if(pointActions.classList.contains('hidden')||selectedIndex<0||!points[selectedIndex]||!views.shape.classList.contains('active'))return;
+  const cr=editCanvas.getBoundingClientRect(), sr=stageWrap.getBoundingClientRect(), p=points[selectedIndex];
+  if(!cr.width||!cr.height)return;
+  let x=cr.left-sr.left+(p.x/editCanvas.width)*cr.width;
+  let y=cr.top-sr.top+(p.y/editCanvas.height)*cr.height;
+  x=clamp(x,90,sr.width-90);y=clamp(y,28,sr.height-28);
+  pointActions.style.left=`${x}px`;pointActions.style.top=`${y}px`;
+  removePointBtn.disabled=p.corner!==undefined;
+  removePointBtn.title=p.corner!==undefined?'The four corner points cannot be removed.':'Remove this point';
+}
+
 function renderEditor(){
   ectx.clearRect(0,0,editCanvas.width,editCanvas.height); ectx.drawImage(sourceCanvas,0,0);
+  if(!points.length)return;
   ectx.save();
   ectx.fillStyle='rgba(0,0,0,.42)'; ectx.beginPath(); ectx.rect(0,0,editCanvas.width,editCanvas.height);
   ectx.moveTo(points[0].x,points[0].y); for(let i=1;i<points.length;i++) ectx.lineTo(points[i].x,points[i].y); ectx.closePath();
   ectx.fill('evenodd');
-  ectx.lineJoin='round'; ectx.lineCap='round'; ectx.strokeStyle='#63d7ff'; ectx.lineWidth=Math.max(4,editCanvas.width/400);
+  ectx.lineJoin='round'; ectx.lineCap='round'; ectx.strokeStyle='#57d9ff'; ectx.lineWidth=Math.max(4,editCanvas.width/400);
   ectx.beginPath(); points.forEach((p,i)=>i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y)); ectx.closePath(); ectx.stroke();
   const r=Math.max(13,editCanvas.width/90);
   points.forEach((p,i)=>{
+    if(i===selectedIndex){
+      ectx.beginPath();ectx.arc(p.x,p.y,(p.corner!==undefined?r*1.08:r)+r*.62,0,Math.PI*2);
+      ectx.fillStyle='rgba(255,255,255,.15)';ectx.fill();ectx.lineWidth=Math.max(2,editCanvas.width/900);ectx.strokeStyle='rgba(255,255,255,.88)';ectx.stroke();
+    }
     ectx.beginPath(); ectx.arc(p.x,p.y,p.corner!==undefined?r*1.08:r,0,Math.PI*2);
-    ectx.fillStyle=p.corner!==undefined?'#ff7a1a':'#63d7ff'; ectx.fill(); ectx.lineWidth=Math.max(3,editCanvas.width/600); ectx.strokeStyle='#fff'; ectx.stroke();
+    ectx.fillStyle=p.corner!==undefined?'#ff8a38':'#57d9ff'; ectx.fill(); ectx.lineWidth=Math.max(3,editCanvas.width/600); ectx.strokeStyle='#fff'; ectx.stroke();
   });
   ectx.restore();
+  updatePointActions();
 }
 
 function eventToCanvas(ev){
   const rect=editCanvas.getBoundingClientRect(); return {x:(ev.clientX-rect.left)*editCanvas.width/rect.width,y:(ev.clientY-rect.top)*editCanvas.height/rect.height};
 }
-function nearestPoint(pos){let best=-1,bd=Infinity;points.forEach((p,i)=>{const d=Math.hypot(p.x-pos.x,p.y-pos.y);if(d<bd){bd=d;best=i}});const rect=editCanvas.getBoundingClientRect();const threshold=38*editCanvas.width/rect.width;return bd<threshold?best:-1;}
+function nearestPoint(pos,radiusCss=SELECT_RADIUS_CSS){
+  let best=-1,bd=Infinity;points.forEach((p,i)=>{const d=Math.hypot(p.x-pos.x,p.y-pos.y);if(d<bd){bd=d;best=i}});
+  const rect=editCanvas.getBoundingClientRect();const threshold=radiusCss*editCanvas.width/Math.max(1,rect.width);return bd<threshold?best:-1;
+}
 function pointSegDistance(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;if(!l2)return {d:Math.hypot(p.x-a.x,p.y-a.y),t:0};let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/l2;t=clamp(t,0,1);const x=a.x+t*dx,y=a.y+t*dy;return {d:Math.hypot(p.x-x,p.y-y),t,x,y};}
 function addPointAt(pos){
+  const existing=nearestPoint(pos,SELECT_RADIUS_CSS+8);
+  if(existing>=0){selectPoint(existing,true);return;}
   let best={d:Infinity,i:-1,x:pos.x,y:pos.y};
   for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],r=pointSegDistance(pos,a,b);if(r.d<best.d)best={...r,i};}
-  const rect=editCanvas.getBoundingClientRect(); const maxD=55*editCanvas.width/rect.width;
-  if(best.d>maxD){toast('Tap closer to the blue edge.');return;}
-  const np={x:best.x,y:best.y}; history.push(points.map(p=>({...p}))); points.splice(best.i+1,0,np); renderEditor();
+  const rect=editCanvas.getBoundingClientRect(); const maxD=EDGE_TAP_RADIUS_CSS*editCanvas.width/Math.max(1,rect.width);
+  if(best.d>maxD){hidePointActions();toast('Tap the blue perimeter to add a point.');return;}
+  const np={x:best.x,y:best.y}; history.push(points.map(p=>({...p}))); points.splice(best.i+1,0,np); selectedIndex=best.i+1; renderEditor();pointActions.classList.remove('hidden');updatePointActions();
 }
 function showLoupe(p,ev){
-  const size=120, zoom=2.6; lctx.clearRect(0,0,160,160);
-  const sx=clamp(p.x-size/(2*zoom),0,sourceCanvas.width),sy=clamp(p.y-size/(2*zoom),0,sourceCanvas.height);
-  lctx.imageSmoothingEnabled=true; lctx.drawImage(sourceCanvas,sx,sy,size/zoom,size/zoom,0,0,160,160);
-  const stage=$('shapeView').querySelector('.stage-wrap').getBoundingClientRect();
+  const crop=Math.max(34,105/Math.max(1,Math.sqrt(editZoom))), zoom=3.0; lctx.clearRect(0,0,160,160);
+  const sx=clamp(p.x-crop/(2*zoom),0,Math.max(0,sourceCanvas.width-crop/zoom)),sy=clamp(p.y-crop/(2*zoom),0,Math.max(0,sourceCanvas.height-crop/zoom));
+  lctx.imageSmoothingEnabled=true; lctx.drawImage(sourceCanvas,sx,sy,crop/zoom,crop/zoom,0,0,160,160);
+  const stage=stageWrap.getBoundingClientRect();
   let left=ev.clientX-stage.left-82, top=ev.clientY-stage.top-205; left=clamp(left,4,stage.width-168); if(top<4) top=ev.clientY-stage.top+45;
   loupe.style.left=left+'px'; loupe.style.top=clamp(top,4,stage.height-168)+'px'; loupe.classList.remove('hidden');
 }
+function screenDistance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function midpoint(a,b){return{x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
+function startPinch(){
+  const ps=[...activePointers.values()];if(ps.length<2)return;
+  const a=ps[0],b=ps[1]; pinchState={distance:Math.max(1,screenDistance(a,b)),zoom:editZoom,panX,panY,mid:midpoint(a,b)};
+  pinchedUntilClear=true;gesture=null;hidePointActions();loupe.classList.add('hidden');
+}
+function handlePinch(){
+  if(!pinchState||activePointers.size<2)return;const ps=[...activePointers.values()],a=ps[0],b=ps[1];
+  const dist=Math.max(1,screenDistance(a,b)), mid=midpoint(a,b), newZoom=clamp(pinchState.zoom*(dist/pinchState.distance),1,MAX_ZOOM), factor=newZoom/pinchState.zoom;
+  const sr=stageWrap.getBoundingClientRect(),cx=sr.left+sr.width/2,cy=sr.top+sr.height/2;
+  panX=(mid.x-cx)-factor*(pinchState.mid.x-cx-pinchState.panX);
+  panY=(mid.y-cy)-factor*(pinchState.mid.y-cy-pinchState.panY);
+  editZoom=newZoom;clampPan();applyViewport(true);
+}
 
-editCanvas.addEventListener('pointerdown',ev=>{ev.preventDefault();editCanvas.setPointerCapture(ev.pointerId);const p=eventToCanvas(ev);draggedIndex=nearestPoint(p);pointerMoved=false;downPos=p;if(draggedIndex>=0){history.push(points.map(q=>({...q})));showLoupe(points[draggedIndex],ev);}});
-editCanvas.addEventListener('pointermove',ev=>{if(draggedIndex<0)return;ev.preventDefault();const p=eventToCanvas(ev);if(Math.hypot(p.x-downPos.x,p.y-downPos.y)>3)pointerMoved=true;points[draggedIndex].x=clamp(p.x,0,editCanvas.width-1);points[draggedIndex].y=clamp(p.y,0,editCanvas.height-1);renderEditor();showLoupe(points[draggedIndex],ev);});
-editCanvas.addEventListener('pointerup',ev=>{ev.preventDefault();loupe.classList.add('hidden');if(draggedIndex<0){const p=eventToCanvas(ev);if(!pointerMoved)addPointAt(p);}draggedIndex=-1;});
-editCanvas.addEventListener('pointercancel',()=>{loupe.classList.add('hidden');draggedIndex=-1;});
+editCanvas.addEventListener('pointerdown',ev=>{
+  ev.preventDefault();editCanvas.setPointerCapture?.(ev.pointerId);activePointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(activePointers.size>=2){startPinch();return;}
+  const p=eventToCanvas(ev),idx=nearestPoint(p);
+  if(idx>=0){
+    selectedIndex=idx;renderEditor();hidePointActions();
+    gesture={type:'point',pointerId:ev.pointerId,startClient:{x:ev.clientX,y:ev.clientY},startCanvas:p,origin:{x:points[idx].x,y:points[idx].y},index:idx,moved:false,historySaved:false};
+  }else{
+    hidePointActions();
+    gesture={type:'blank',pointerId:ev.pointerId,startClient:{x:ev.clientX,y:ev.clientY},downCanvas:p,panStart:{x:panX,y:panY},moved:false};
+  }
+});
+editCanvas.addEventListener('pointermove',ev=>{
+  if(activePointers.has(ev.pointerId))activePointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(pinchedUntilClear&&activePointers.size>=2){handlePinch();return;}
+  if(!gesture||gesture.pointerId!==ev.pointerId||pinchedUntilClear)return;
+  ev.preventDefault();const dist=Math.hypot(ev.clientX-gesture.startClient.x,ev.clientY-gesture.startClient.y);
+  if(gesture.type==='point'){
+    if(dist<5&&!gesture.moved)return;
+    if(!gesture.historySaved){history.push(points.map(q=>({...q})));gesture.historySaved=true;}
+    gesture.moved=true;hidePointActions();
+    const p=eventToCanvas(ev), factor=editZoom>1.05?.62:.78, target=points[gesture.index];
+    target.x=clamp(gesture.origin.x+(p.x-gesture.startCanvas.x)*factor,0,editCanvas.width-1);
+    target.y=clamp(gesture.origin.y+(p.y-gesture.startCanvas.y)*factor,0,editCanvas.height-1);
+    selectedIndex=gesture.index;renderEditor();showLoupe(target,ev);applyViewport(false);
+  }else if(gesture.type==='blank'){
+    if(dist>7)gesture.moved=true;
+    if(gesture.moved&&editZoom>1.01){panX=gesture.panStart.x+(ev.clientX-gesture.startClient.x);panY=gesture.panStart.y+(ev.clientY-gesture.startClient.y);clampPan();applyViewport(false);}
+  }
+});
+editCanvas.addEventListener('pointerup',ev=>{
+  ev.preventDefault();activePointers.delete(ev.pointerId);loupe.classList.add('hidden');
+  if(pinchedUntilClear){if(activePointers.size===0){pinchedUntilClear=false;pinchState=null;gesture=null;applyViewport(true);}return;}
+  if(!gesture||gesture.pointerId!==ev.pointerId)return;
+  const g=gesture;gesture=null;
+  if(g.type==='point'){
+    selectedIndex=g.index;renderEditor();pointActions.classList.remove('hidden');updatePointActions();applyViewport(false);
+  }else if(!g.moved){addPointAt(g.downCanvas);}else applyViewport(false);
+});
+editCanvas.addEventListener('pointercancel',ev=>{activePointers.delete(ev.pointerId);loupe.classList.add('hidden');if(activePointers.size===0){gesture=null;pinchState=null;pinchedUntilClear=false;}applyViewport(false);});
+
+movePointBtn.addEventListener('pointerdown',ev=>{
+  ev.preventDefault();ev.stopPropagation();if(selectedIndex<0||!points[selectedIndex])return;
+  movePointBtn.setPointerCapture?.(ev.pointerId);
+  precisionMove={pointerId:ev.pointerId,index:selectedIndex,startX:ev.clientX,startY:ev.clientY,origin:{x:points[selectedIndex].x,y:points[selectedIndex].y},historySaved:false,moved:false};
+  hidePointActions();views.shape.classList.add('focus-edit');showLoupe(points[selectedIndex],ev);
+});
+movePointBtn.addEventListener('pointermove',ev=>{
+  if(!precisionMove||precisionMove.pointerId!==ev.pointerId)return;ev.preventDefault();
+  const dx=ev.clientX-precisionMove.startX,dy=ev.clientY-precisionMove.startY;if(Math.hypot(dx,dy)<2&&!precisionMove.moved)return;
+  if(!precisionMove.historySaved){history.push(points.map(q=>({...q})));precisionMove.historySaved=true;}precisionMove.moved=true;
+  const rect=editCanvas.getBoundingClientRect(),factor=.42,cpX=editCanvas.width/Math.max(1,rect.width),cpY=editCanvas.height/Math.max(1,rect.height),p=points[precisionMove.index];
+  p.x=clamp(precisionMove.origin.x+dx*cpX*factor,0,editCanvas.width-1);p.y=clamp(precisionMove.origin.y+dy*cpY*factor,0,editCanvas.height-1);
+  selectedIndex=precisionMove.index;renderEditor();showLoupe(p,ev);
+});
+function endPrecisionMove(ev){
+  if(!precisionMove||precisionMove.pointerId!==ev.pointerId)return;ev.preventDefault();loupe.classList.add('hidden');
+  selectedIndex=precisionMove.index;precisionMove=null;renderEditor();pointActions.classList.remove('hidden');updatePointActions();applyViewport(false);
+}
+movePointBtn.addEventListener('pointerup',endPrecisionMove);movePointBtn.addEventListener('pointercancel',endPrecisionMove);
+removePointBtn.addEventListener('click',ev=>{
+  ev.stopPropagation();if(selectedIndex<0||!points[selectedIndex])return;
+  if(points[selectedIndex].corner!==undefined){toast('The four corner points cannot be removed.');return;}
+  history.push(points.map(q=>({...q})));points.splice(selectedIndex,1);selectedIndex=-1;hidePointActions();renderEditor();
+});
 
 function getEdgePoints(cornerA,cornerB){
   const ia=points.findIndex(p=>p.corner===cornerA), ib=points.findIndex(p=>p.corner===cornerB); if(ia<0||ib<0)return [];
@@ -244,7 +390,7 @@ function setModeButtons(){[$('originalModeBtn'),$('cleanModeBtn'),$('bwModeBtn')
 
 function rotateSource(){
   const c=document.createElement('canvas');c.width=sourceCanvas.height;c.height=sourceCanvas.width;const cx=c.getContext('2d');cx.translate(c.width,0);cx.rotate(Math.PI/2);cx.drawImage(sourceCanvas,0,0);
-  sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=autoDetectDocument();history=[];renderEditor();
+  sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=autoDetectDocument();history=[];selectedIndex=-1;hidePointActions();resetViewport();renderEditor();
 }
 
 function downloadCanvas(type='image/png'){
@@ -255,9 +401,9 @@ async function shareCanvas(){
 }
 
 $('cameraInput').addEventListener('change',e=>loadFile(e.target.files[0]));$('galleryInput').addEventListener('change',e=>loadFile(e.target.files[0]));
-$('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();renderEditor();toast('Document edge re-detected.');});
-$('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();renderEditor();});
-$('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();renderEditor();}else toast('Nothing to undo yet.');});
+$('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Document edge re-detected.');});
+$('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
+$('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());$('correctBtn').addEventListener('click',runCorrection);
 $('backShapeBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
 $('originalModeBtn').addEventListener('click',()=>setMode('original'));$('cleanModeBtn').addEventListener('click',()=>setMode('clean'));$('bwModeBtn').addEventListener('click',()=>setMode('bw'));

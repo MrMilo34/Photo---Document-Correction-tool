@@ -1,35 +1,57 @@
-# Document Corrector v0.1
+# Document Corrector v0.2
 
 A phone-first, installable document correction app. It runs locally in the browser/PWA and does not send document images to a server.
 
-## Current workflow
+## v0.2 editor changes
+
+- **Pinch to zoom** up to 5× for precise perimeter editing.
+- **Drag the image to pan** while zoomed in.
+- Taps near an existing point now **select that point first** instead of accidentally adding another point.
+- Tapping a point opens contextual controls on either side:
+  - **↔ Move** — press and drag for extra-slow precision movement.
+  - **✕ Remove** — removes user-added edge points. The four required corner points cannot be deleted.
+- Direct point dragging is intentionally slowed slightly for finer placement.
+- Tap an empty section of the blue perimeter to add a new point, as before.
+- **Undo Point** and **Rotate** remain available.
+- The editor controls fade away when zoomed in so the document stays uncluttered while doing precision work.
+- Updated blue / purple minimal interface and the new neon document-perimeter app icon.
+
+## Workflow
 
 1. Take a photo or choose one from the phone.
 2. The app makes a rough four-corner document guess.
-3. Drag any orange corner.
-4. Tap a blue edge to insert an extra perimeter point; drag it to match bowed/curved paper edges.
-5. Tap **CORRECT DOCUMENT**.
-6. Choose **Corrected**, **Clean**, or **B&W**.
-7. Save or share the result.
+3. Drag the corner points into place.
+4. Tap blue edge sections to add perimeter points where the page bows or curves.
+5. Pinch to zoom for close work. Tap an existing point to select it, or use **↔ Move** for very fine adjustment.
+6. Tap **CORRECT DOCUMENT**.
+7. Choose **Corrected**, **Clean**, or **B&W**.
+8. Save or share the result.
 
-## Integrity rule
+## Document integrity rule
 
-This version uses geometry and deterministic image processing. It does **not** use generative image reconstruction. Cleanup changes lighting/contrast and maps the original photographed pixels into a flattened page.
+This app uses geometry and deterministic image processing. It does **not** use generative image reconstruction. Cleanup changes lighting/contrast and maps the original photographed pixels into a flattened page. It does not guess VINs, rebuild text, or invent document content.
 
-## Install on Android as an app
+## Updating the GitHub Pages copy
 
-The easiest test route is GitHub Pages:
+Upload the contents of this folder to the **root of the same repository**, replacing the older files with the same names. Keep this structure:
 
-1. Upload the contents of this folder to a GitHub repository.
-2. Enable GitHub Pages for the repository.
-3. Open the Pages address in Chrome on Android.
-4. Chrome menu → **Add to Home screen** / **Install app**.
+```text
+index.html
+app.js
+styles.css
+manifest.webmanifest
+sw.js
+README.md
+icons/
+  icon-192.png
+  icon-512.png
+  icon-source.png
+```
 
-After the first successful load, the service worker caches the app shell for offline use.
+GitHub Pages can remain set to:
 
-## Notes for v0.1
+- Source: **Deploy from a branch**
+- Branch: **main**
+- Folder: **/(root)**
 
-- Output is capped at about 2000 px on the longest corrected dimension so the curved-edge remap stays practical on a phone.
-- Automatic corner detection is intentionally conservative and is only the starting suggestion; the user-controlled perimeter is authoritative.
-- Curved-edge correction uses a Coons-patch style mapping from the four user-defined boundary curves.
-- The cleanup filter estimates uneven illumination and normalizes it. It does not invent missing characters.
+The service worker cache name changed in v0.2, so the new app files should replace the old cached build automatically after GitHub Pages publishes the update. If Chrome still shows the old interface, close the installed app/browser tab completely and reopen it after a minute.
