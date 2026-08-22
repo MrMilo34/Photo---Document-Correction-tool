@@ -1,24 +1,21 @@
-# DocMesh v0.5.1
+# DocMesh v0.5.2 — Cache Reset Release
 
-This is a cache-reliability hotfix for v0.5.
-
-## Included app changes
-- Result order: **Adjust, Greyscale, Corrected, AI Assisted**
-- **Corrected** uses the balanced cleanup pass.
-- **AI Assisted** uses the stronger cleanup pass.
-- New DocMesh splash screen.
-- Neon pink corner points and purple-blue edge points.
-
-## v0.5.1 cache fix
-GitHub Pages + the previous offline service worker could continue serving the older app after a normal refresh.
-
-This build:
-- uses versioned app asset URLs,
-- forces the service worker update check,
-- uses a network-first strategy when online,
-- removes older DocMesh caches after activation.
+This release keeps the v0.5 changes but removes stale browser/service-worker caching as a variable.
 
 ## Upload
-Replace the existing repository files with the contents of this package, including the `assets` folder.
+Replace ALL files and folders in the ROOT of the same GitHub repository with the contents of this package.
 
-After GitHub Pages finishes deploying, open the normal site once. If the old app is still visible on that first load, close the tab/app and reopen it once more so the new service worker takes control.
+The repository root must directly contain:
+- index.html
+- app.js
+- styles.css
+- manifest.webmanifest
+- sw.js
+- README.md
+- assets/
+- icons/
+
+After GitHub Pages finishes deploying, open the site once with `?reset=052` added to the end.
+You should see `release v0.5.2` under the splash screen.
+
+If that still shows the old build, the repository or Pages deployment is serving old files rather than this being a phone cache issue.

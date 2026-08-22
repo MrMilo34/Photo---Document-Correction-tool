@@ -614,13 +614,4 @@ $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
 
-if('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const registration = await navigator.serviceWorker.register('./sw.js?v=0.5.1', { updateViaCache: 'none' });
-      await registration.update();
-    } catch (err) {
-      console.warn(err);
-    }
-  });
-}
+// Service worker intentionally disabled in v0.5.2 so GitHub Pages updates cannot be hidden by stale offline cache.
