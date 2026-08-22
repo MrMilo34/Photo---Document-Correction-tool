@@ -1,7 +1,7 @@
 {
-  "name": "Document Corrector",
-  "short_name": "Doc Corrector",
-  "description": "Perspective, curved-edge correction, manual image adjustments, and non-generative shadow polish for photographed documents.",
+  "name": "DocMesh",
+  "short_name": "DocMesh",
+  "description": "Perspective and curved-edge correction, manual image adjustments, greyscale scan mode, balanced corrected cleanup, and aggressive AI Assisted cleanup for photographed documents.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",

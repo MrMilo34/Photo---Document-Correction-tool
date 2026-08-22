@@ -15,10 +15,11 @@ let draggedIndex = -1;
 let pointerMoved = false;
 let downPos = null;
 let correctedOriginal = null;
+let correctedImage = null;
 let aiAssistImage = null;
 let adjustedImage = null;
 let bwImage = null;
-let currentMode = 'original';
+let currentMode = 'corrected';
 let adjustTimer = null;
 const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
 let history = [];
@@ -190,7 +191,7 @@ function renderEditor(){
   ectx.fillStyle='rgba(0,0,0,.42)'; ectx.beginPath(); ectx.rect(0,0,editCanvas.width,editCanvas.height);
   ectx.moveTo(points[0].x,points[0].y); for(let i=1;i<points.length;i++) ectx.lineTo(points[i].x,points[i].y); ectx.closePath();
   ectx.fill('evenodd');
-  ectx.lineJoin='round'; ectx.lineCap='round'; ectx.strokeStyle='#57d9ff'; ectx.lineWidth=Math.max(4,editCanvas.width/400);
+  ectx.lineJoin='round'; ectx.lineCap='round'; ectx.strokeStyle='#48d6ff'; ectx.lineWidth=Math.max(4,editCanvas.width/400);
   ectx.beginPath(); points.forEach((p,i)=>i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y)); ectx.closePath(); ectx.stroke();
   const r=Math.max(13,editCanvas.width/90);
   points.forEach((p,i)=>{
@@ -199,7 +200,7 @@ function renderEditor(){
       ectx.fillStyle='rgba(255,255,255,.15)';ectx.fill();ectx.lineWidth=Math.max(2,editCanvas.width/900);ectx.strokeStyle='rgba(255,255,255,.88)';ectx.stroke();
     }
     ectx.beginPath(); ectx.arc(p.x,p.y,p.corner!==undefined?r*1.08:r,0,Math.PI*2);
-    ectx.fillStyle=p.corner!==undefined?'#ff8a38':'#57d9ff'; ectx.fill(); ectx.lineWidth=Math.max(3,editCanvas.width/600); ectx.strokeStyle='#fff'; ectx.stroke();
+    ectx.fillStyle=p.corner!==undefined?'#ff4fe3':'#6987ff'; ectx.fill(); ectx.lineWidth=Math.max(3,editCanvas.width/600); ectx.strokeStyle='#fff'; ectx.stroke();
   });
   ectx.restore();
   updatePointActions();
@@ -355,48 +356,138 @@ function makeCorrected(){
 }
 
 function cleanupImage(img){
-  // Non-generative "AI Assist" style polish: estimate the paper illumination
-  // from bright local pixels, smooth that estimate, then normalize broad shadows.
-  const W=img.width,H=img.height,src=img.data,out=new ImageData(new Uint8ClampedArray(src),W,H),d=out.data;
-  const step=Math.max(18,Math.round(Math.max(W,H)/82)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), bins=24;
-  const hist=new Uint32Array(gw*gh*bins), counts=new Uint32Array(gw*gh);
-  for(let y=0;y<H;y+=3) for(let x=0;x<W;x+=3){
-    const i=(y*W+x)*4, lum=.299*src[i]+.587*src[i+1]+.114*src[i+2], cell=Math.floor(y/step)*gw+Math.floor(x/step), b=Math.min(bins-1,Math.floor(lum*bins/256));
-    hist[cell*bins+b]++; counts[cell]++;
+  // Stronger local "AI Assist" polish while remaining tied to the original photographed pixels.
+  const W=img.width,H=img.height,src=img.data;
+  const out=new ImageData(new Uint8ClampedArray(src),W,H),d=out.data;
+  const step=Math.max(18,Math.round(Math.max(W,H)/84)), gw=Math.ceil(W/step), gh=Math.ceil(H/step);
+  const count=gw*gh;
+  const lumGrid=new Float32Array(count), rGrid=new Float32Array(count), gGrid=new Float32Array(count), bGrid=new Float32Array(count), wGrid=new Float32Array(count);
+  let globalR=0,globalG=0,globalB=0,globalW=0;
+  for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
+    const i=(y*W+x)*4;
+    const r=src[i], g=src[i+1], b=src[i+2];
+    const lum=.299*r+.587*g+.114*b;
+    const w=Math.pow(clamp((lum-108)/132,0,1),1.45)+0.04;
+    const cell=Math.floor(y/step)*gw+Math.floor(x/step);
+    lumGrid[cell]+=lum*w; rGrid[cell]+=r*w; gGrid[cell]+=g*w; bGrid[cell]+=b*w; wGrid[cell]+=w;
+    globalR+=r*w; globalG+=g*w; globalB+=b*w; globalW+=w;
   }
-  let grid=new Float32Array(gw*gh);
-  for(let c=0;c<grid.length;c++){
-    const target=Math.max(1,Math.ceil(counts[c]*.82)); let acc=0,b=bins-1;
-    // Find roughly the 82nd percentile from the dark side; this tracks paper rather than ink.
-    for(b=0;b<bins;b++){acc+=hist[c*bins+b]; if(acc>=target)break;}
-    grid[c]=((Math.min(b,bins-1)+.5)*256/bins);
+  const fallbackR=globalW?globalR/globalW:232, fallbackG=globalW?globalG/globalW:232, fallbackB=globalW?globalB/globalW:232;
+  for(let i=0;i<count;i++){
+    if(wGrid[i]>.001){lumGrid[i]/=wGrid[i]; rGrid[i]/=wGrid[i]; gGrid[i]/=wGrid[i]; bGrid[i]/=wGrid[i];}
+    else{lumGrid[i]=236; rGrid[i]=fallbackR; gGrid[i]=fallbackG; bGrid[i]=fallbackB;}
   }
   for(let pass=0;pass<4;pass++){
-    const ng=new Float32Array(grid.length);
-    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){
-      let sum=0,weight=0;
-      for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
-        const dx=xx-x,dy=yy-y,wgt=(dx===0&&dy===0)?3:1;sum+=grid[yy*gw+xx]*wgt;weight+=wgt;
+    const nLum=new Float32Array(count), nR=new Float32Array(count), nG=new Float32Array(count), nB=new Float32Array(count);
+    for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
+      let sLum=0,sR=0,sG=0,sB=0,weight=0;
+      for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++) for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
+        const dx=xx-x,dy=yy-y, idx=yy*gw+xx, w=(dx===0&&dy===0)?3:((Math.abs(dx)+Math.abs(dy)===1)?2:1);
+        sLum+=lumGrid[idx]*w; sR+=rGrid[idx]*w; sG+=gGrid[idx]*w; sB+=bGrid[idx]*w; weight+=w;
       }
-      ng[y*gw+x]=sum/weight;
+      const idx=y*gw+x;
+      nLum[idx]=sLum/weight; nR[idx]=sR/weight; nG[idx]=sG/weight; nB[idx]=sB/weight;
     }
-    grid=ng;
+    lumGrid.set(nLum); rGrid.set(nR); gGrid.set(nG); bGrid.set(nB);
   }
-  const targetPaper=238;
+  const base=new Uint8ClampedArray(src.length);
   let p=0;
   for(let y=0;y<H;y++){
-    const gy=y/step,y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
+    const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)), y1=Math.min(gh-1,y0+1), fy=gy-y0;
     for(let x=0;x<W;x++,p+=4){
-      const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;
-      const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,b=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,illum=a*(1-fy)+b*fy;
-      const gain=clamp(targetPaper/Math.max(illum,70),.82,1.52);
+      const gx=x/step, x0=Math.min(gw-1,Math.floor(gx)), x1=Math.min(gw-1,x0+1), fx=gx-x0;
+      const i00=y0*gw+x0, i10=y0*gw+x1, i01=y1*gw+x0, i11=y1*gw+x1;
+      const interp=(arr)=>{const a=arr[i00]*(1-fx)+arr[i10]*fx, b=arr[i01]*(1-fx)+arr[i11]*fx; return a*(1-fy)+b*fy;};
+      const illum=interp(lumGrid), ir=interp(rGrid), ig=interp(gGrid), ib=interp(bGrid);
+      const shadowBoost=clamp((228-illum)/140,0,1);
+      const gainL=clamp(244/Math.max(illum,62),0.8,1.82);
+      const gains=[clamp((242/Math.max(ir,72))*(0.82+shadowBoost*0.28),0.82,1.72),clamp((242/Math.max(ig,72))*(0.82+shadowBoost*0.28),0.82,1.72),clamp((242/Math.max(ib,72))*(0.82+shadowBoost*0.28),0.82,1.72)];
       for(let c=0;c<3;c++){
-        let v=src[p+c]*gain;
-        v=(v-128)*1.045+128;
-        if(v>225)v=225+(v-225)*1.18;
+        const sv=src[p+c];
+        let v=sv*(gains[c]*0.6 + gainL*0.4);
+        v=(v-128)*(1.05+shadowBoost*0.08)+128;
+        if(v>220) v=220+(v-220)*(1.18+shadowBoost*0.08);
+        base[p+c]=clamp(v,0,255);
+      }
+      base[p+3]=255;
+    }
+  }
+  // Mild clarity boost from immediate neighbours.
+  p=0;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++,p+=4){
+      for(let c=0;c<3;c++){
+        let v=base[p+c];
+        if(x>0&&x<W-1&&y>0&&y<H-1){
+          const up=((y-1)*W+x)*4+c, dn=((y+1)*W+x)*4+c, lf=(y*W+x-1)*4+c, rt=(y*W+x+1)*4+c;
+          const blur=(base[up]+base[dn]+base[lf]+base[rt])*0.25;
+          v=v+(v-blur)*0.16;
+        }
         d[p+c]=clamp(v,0,255);
       }
       d[p+3]=255;
+    }
+  }
+  return out;
+}
+
+
+
+function aggressiveCleanupImage(img){
+  // Stronger cleanup mode: build on the balanced correction and push shadow removal and clarity further.
+  const base = cleanupImage(img);
+  const W=base.width,H=base.height, src=base.data;
+  const out=new ImageData(new Uint8ClampedArray(src),W,H), d=out.data;
+  const step=Math.max(14,Math.round(Math.max(W,H)/96)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
+  const lumGrid=new Float32Array(count), weightGrid=new Float32Array(count);
+  for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
+    const i=(y*W+x)*4;
+    const lum=.299*src[i]+.587*src[i+1]+.114*src[i+2];
+    const w=Math.pow(clamp((lum-90)/150,0,1),1.3)+0.05;
+    const cell=Math.floor(y/step)*gw+Math.floor(x/step);
+    lumGrid[cell]+=lum*w; weightGrid[cell]+=w;
+  }
+  for(let i=0;i<count;i++) lumGrid[i]=weightGrid[i]>.001 ? lumGrid[i]/weightGrid[i] : 238;
+  for(let pass=0; pass<5; pass++){
+    const next=new Float32Array(count);
+    for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
+      let s=0,w=0;
+      for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++) for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
+        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?4:((Math.abs(dx)+Math.abs(dy)===1)?2:1);
+        s+=lumGrid[idx]*wt; w+=wt;
+      }
+      next[y*gw+x]=s/w;
+    }
+    lumGrid.set(next);
+  }
+  let p=0;
+  for(let y=0;y<H;y++){
+    const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)), y1=Math.min(gh-1,y0+1), fy=gy-y0;
+    for(let x=0;x<W;x++,p+=4){
+      const gx=x/step, x0=Math.min(gw-1,Math.floor(gx)), x1=Math.min(gw-1,x0+1), fx=gx-x0;
+      const a=lumGrid[y0*gw+x0]*(1-fx)+lumGrid[y0*gw+x1]*fx;
+      const b=lumGrid[y1*gw+x0]*(1-fx)+lumGrid[y1*gw+x1]*fx;
+      const illum=a*(1-fy)+b*fy;
+      const shadowBoost=clamp((240-illum)/120,0,1);
+      for(let c=0;c<3;c++){
+        let v=src[p+c];
+        v=v*(1.02+shadowBoost*0.22);
+        v=(v-128)*(1.07+shadowBoost*0.06)+128;
+        if(v>214) v=214+(v-214)*1.24;
+        d[p+c]=clamp(v,0,255);
+      }
+      d[p+3]=255;
+    }
+  }
+  // Stronger local sharpening, but only from neighbouring source pixels.
+  const tmp=new Uint8ClampedArray(d);
+  for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
+    const p=(y*W+x)*4;
+    for(let c=0;c<3;c++){
+      const up=((y-1)*W+x)*4+c, dn=((y+1)*W+x)*4+c, lf=(y*W+x-1)*4+c, rt=(y*W+x+1)*4+c;
+      const blur=(tmp[up]+tmp[dn]+tmp[lf]+tmp[rt])*0.25;
+      let v=tmp[p+c]+(tmp[p+c]-blur)*0.26;
+      d[p+c]=clamp(v,0,255);
     }
   }
   return out;
@@ -443,7 +534,7 @@ function resetAdjustments(render=false){
 }
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();aiAssistImage=null;adjustedImage=null;bwImage=null;currentMode='original';resetAdjustments(false);displayImage(correctedOriginal);setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;bwImage=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
@@ -451,20 +542,33 @@ async function setMode(mode){
   currentMode=mode;
   $('adjustPanel').classList.toggle('hidden',mode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',mode!=='assist');
-  if(mode==='assist'&&!aiAssistImage){busy(true,'Polishing shadows & lighting…');await new Promise(r=>setTimeout(r,35));}
-  else if(mode==='bw'&&!bwImage){busy(true,'Making scan…');await new Promise(r=>setTimeout(r,30));}
+  if(mode==='assist'&&!aiAssistImage){busy(true,'Running AI Assisted cleanup…');await new Promise(r=>setTimeout(r,35));}
+  else if(mode==='bw'&&!bwImage){busy(true,'Making greyscale scan…');await new Promise(r=>setTimeout(r,30));}
   try{
-    if(mode==='original') displayImage(correctedOriginal);
-    else if(mode==='adjust') {adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
-    else if(mode==='assist') {aiAssistImage ||= cleanupImage(correctedOriginal);displayImage(aiAssistImage);}
-    else {aiAssistImage ||= cleanupImage(correctedOriginal);bwImage ||= blackWhiteImage(aiAssistImage);displayImage(bwImage);}
+    if(mode==='corrected') {
+      correctedImage ||= cleanupImage(correctedOriginal);
+      displayImage(correctedImage);
+    }
+    else if(mode==='adjust') {
+      adjustedImage=applyAdjustments(correctedOriginal);
+      displayImage(adjustedImage);
+    }
+    else if(mode==='assist') {
+      aiAssistImage ||= aggressiveCleanupImage(correctedOriginal);
+      displayImage(aiAssistImage);
+    }
+    else {
+      correctedImage ||= cleanupImage(correctedOriginal);
+      bwImage ||= blackWhiteImage(correctedImage);
+      displayImage(bwImage);
+    }
     setModeButtons();
   }finally{busy(false);}
 }
 function setModeButtons(){
-  const map={original:'originalModeBtn',adjust:'adjustModeBtn',assist:'aiAssistModeBtn',bw:'bwModeBtn'};
+  const map={adjust:'adjustModeBtn',bw:'bwModeBtn',corrected:'correctedModeBtn',assist:'aiAssistModeBtn'};
   Object.values(map).forEach(id=>$(id).classList.remove('active'));
-  $(map[currentMode]||map.original).classList.add('active');
+  $(map[currentMode]||map.corrected).classList.add('active');
   $('adjustPanel').classList.toggle('hidden',currentMode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',currentMode!=='assist');
 }
@@ -501,10 +605,10 @@ $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p}))
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());$('correctBtn').addEventListener('click',runCorrection);
 $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
-$('originalModeBtn').addEventListener('click',()=>setMode('original'));
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
-$('aiAssistModeBtn').addEventListener('click',()=>setMode('assist'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
+$('correctedModeBtn').addEventListener('click',()=>setMode('corrected'));
+$('aiAssistModeBtn').addEventListener('click',()=>setMode('assist'));
 ['brightnessSlider','contrastSlider','saturationSlider','blackSlider','whiteSlider'].forEach(id=>$(id).addEventListener('input',scheduleAdjustmentRender));
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);

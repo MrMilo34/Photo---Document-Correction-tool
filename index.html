@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
-  <title>Document Corrector</title>
+  <title>DocMesh</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -14,7 +14,7 @@
   <header class="topbar">
     <button id="headerBackBtn" class="header-back" aria-label="Back to editing">←</button>
     <div class="export-heading">
-      <div class="brand">Document Corrector</div>
+      <div class="brand">DocMesh</div>
       <div class="sub">Polish &amp; export</div>
     </div>
     <button id="aboutBtn" class="icon-btn" aria-label="About">ⓘ</button>
@@ -22,11 +22,10 @@
 
   <main>
     <section id="homeView" class="view active home-view">
-      <div class="hero-card">
-        <img class="home-icon" src="icons/icon-192.png" alt="" aria-hidden="true" />
-        <h1>Scan. Shape. Correct.</h1>
-        <p>Photograph a document, trace its real perimeter, flatten it, then polish the photographed pixels without rebuilding the contents.</p>
+      <div class="hero-card splash-card">
+        <img class="home-splash" src="assets/home-splash.png" alt="DocMesh splash screen" />
       </div>
+      <div class="version-tag">release v0.5</div>
 
       <div class="home-actions">
         <label class="primary big-btn">📷 Take Photo
@@ -35,11 +34,6 @@
         <label class="secondary big-btn">🖼 Choose Photo
           <input id="galleryInput" type="file" accept="image/*" hidden />
         </label>
-      </div>
-
-      <div class="integrity-card">
-        <div class="shield">🔒</div>
-        <div><strong>Document Integrity Mode</strong><br><span>No generated text. No guessed VINs. No rebuilt logos. Corrections stay tied to the original photographed pixels.</span></div>
       </div>
     </section>
 
@@ -67,10 +61,10 @@
       <div class="result-stage"><canvas id="resultCanvas"></canvas></div>
 
       <div class="mode-row">
-        <button id="originalModeBtn" class="seg active">Corrected</button>
         <button id="adjustModeBtn" class="seg">Adjust</button>
-        <button id="aiAssistModeBtn" class="seg ai-seg">✦ AI Assist</button>
-        <button id="bwModeBtn" class="seg">B&amp;W</button>
+        <button id="bwModeBtn" class="seg">Greyscale</button>
+        <button id="correctedModeBtn" class="seg active">Corrected</button>
+        <button id="aiAssistModeBtn" class="seg ai-seg">✦ AI Assisted</button>
       </div>
 
       <section id="adjustPanel" class="adjust-panel hidden" aria-label="Image adjustments">
@@ -106,22 +100,22 @@
 
       <section id="aiAssistPanel" class="assist-panel hidden">
         <div class="assist-badge">✦</div>
-        <div><strong>AI Assist polish</strong><span>Reduces broad shadows and uneven lighting while preserving the original document pixels.</span></div>
+        <div><strong>AI Assisted cleanup</strong><span>Runs a more aggressive cleanup pass to push shadow removal, flatten lighting further, and enhance clarity while staying anchored to the photographed document.</span></div>
       </section>
 
       <div class="result-actions">
         <button id="shareBtn">↗ Share</button>
         <button id="savePngBtn" class="primary">Save PNG</button>
       </div>
-      <p class="safe-note">AI Assist is a non-generative polish pass. It may adjust lighting, colour and contrast, but it never recreates text, numbers, barcodes or logos.</p>
+      <p class="safe-note">Corrected applies the balanced cleanup pass. AI Assisted pushes a stronger cleanup for shadows, lighting and clarity while staying tied to the photographed document.</p>
     </section>
   </main>
 
   <dialog id="aboutDialog">
-    <h2>Document Corrector v0.3</h2>
-    <p>The perimeter points define the true page boundary and the app dewarps the photographed pixels into a flat document.</p>
-    <p><strong>AI Assist</strong> is intentionally non-generative. It estimates broad illumination and shadows, then corrects those pixels without inventing replacement document content.</p>
-    <p><strong>v0.3:</strong> cleaner full-screen editing, a dedicated Back to Edit control, adjustable brightness/contrast/saturation/black/white levels, and the new AI Assist polish pass.</p>
+    <h2>DocMesh v0.5</h2>
+    <p>The perimeter points define the real page boundary and the app dewarps the photographed pixels into a flat document.</p>
+    <p><strong>AI Assist</strong> now has two cleanup levels: Corrected for balanced cleanup and AI Assisted for a more aggressive pass with stronger shadow reduction and clarity enhancement.</p>
+    <p><strong>v0.5:</strong> added the new mode order, renamed B&amp;W to Greyscale, made the balanced cleanup the Corrected view, and added a stronger AI Assisted cleanup mode.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
