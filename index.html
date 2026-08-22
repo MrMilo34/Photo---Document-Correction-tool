@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#101317" />
+  <title>Document Corrector</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="brand">Document Corrector</div>
+      <div class="sub">Original pixels. Better geometry.</div>
+    </div>
+    <button id="aboutBtn" class="icon-btn" aria-label="About">ⓘ</button>
+  </header>
+
+  <main>
+    <section id="homeView" class="view active home-view">
+      <div class="hero-card">
+        <div class="doc-mark" aria-hidden="true">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="paper-lines"></div>
+        </div>
+        <h1>Scan. Shape. Correct.</h1>
+        <p>Photograph a document, trace its real perimeter, flatten it, then remove uneven lighting without reimagining the contents.</p>
+      </div>
+
+      <div class="home-actions">
+        <label class="primary big-btn">📷 Take Photo
+          <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+        </label>
+        <label class="secondary big-btn">🖼 Choose Photo
+          <input id="galleryInput" type="file" accept="image/*" hidden />
+        </label>
+      </div>
+
+      <div class="integrity-card">
+        <div class="shield">🔒</div>
+        <div><strong>Document Integrity Mode</strong><br><span>No generated text. No guessed VINs. No rebuilt logos. Correction is performed on the photographed pixels.</span></div>
+      </div>
+    </section>
+
+    <section id="shapeView" class="view">
+      <div class="stage-wrap">
+        <canvas id="editCanvas"></canvas>
+        <div id="loupe" class="loupe hidden"><canvas id="loupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
+      </div>
+      <div class="hint">Drag any point. Tap an edge to add another point.</div>
+      <div class="toolbar scroll-x">
+        <button id="autoBtn">✨ Auto</button>
+        <button id="undoPointBtn">↶ Undo Point</button>
+        <button id="resetBtn">◇ 4 Points</button>
+        <button id="rotateBtn">↻ Rotate</button>
+      </div>
+      <button id="correctBtn" class="primary bottom-action">CORRECT DOCUMENT</button>
+    </section>
+
+    <section id="resultView" class="view">
+      <div class="result-stage"><canvas id="resultCanvas"></canvas></div>
+      <div class="mode-row">
+        <button id="originalModeBtn" class="seg active">Corrected</button>
+        <button id="cleanModeBtn" class="seg">Clean</button>
+        <button id="bwModeBtn" class="seg">B&amp;W</button>
+      </div>
+      <div class="result-actions">
+        <button id="backShapeBtn">← Shape</button>
+        <button id="shareBtn">↗ Share</button>
+        <button id="savePngBtn" class="primary">Save PNG</button>
+      </div>
+      <p class="safe-note">Cleanup adjusts lighting, contrast and geometry only. It does not generate replacement document content.</p>
+    </section>
+  </main>
+
+  <dialog id="aboutDialog">
+    <h2>Document Corrector v0.1</h2>
+    <p>This first build uses deterministic image processing. The perimeter points define the true page boundary; the interior is dewarped from those points using a curved-surface mapping.</p>
+    <p><strong>Tip:</strong> Place extra points anywhere a paper edge bows or curves.</p>
+    <button id="closeAboutBtn" class="primary">Got it</button>
+  </dialog>
+
+  <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

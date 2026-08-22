@@ -1,0 +1,267 @@
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const views = { home: $('homeView'), shape: $('shapeView'), result: $('resultView') };
+const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
+const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
+const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
+const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
+
+let points = [];
+let draggedIndex = -1;
+let pointerMoved = false;
+let downPos = null;
+let correctedOriginal = null;
+let cleanedImage = null;
+let bwImage = null;
+let currentMode = 'original';
+let history = [];
+let currentFileBase = 'document';
+
+function showView(name){ Object.values(views).forEach(v=>v.classList.remove('active')); views[name].classList.add('active'); window.scrollTo(0,0); }
+function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2200); }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+async function loadFile(file){
+  if(!file) return;
+  currentFileBase = (file.name || 'document').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'document';
+  busy(true,'Loading photo…');
+  try{
+    const bmp = await createImageBitmap(file);
+    const maxDim = 2400;
+    const scale = Math.min(1, maxDim / Math.max(bmp.width,bmp.height));
+    sourceCanvas.width = Math.round(bmp.width*scale); sourceCanvas.height = Math.round(bmp.height*scale);
+    sctx.clearRect(0,0,sourceCanvas.width,sourceCanvas.height);
+    sctx.drawImage(bmp,0,0,sourceCanvas.width,sourceCanvas.height);
+    bmp.close?.();
+    setupEditCanvas();
+    points = autoDetectDocument();
+    history=[];
+    renderEditor();
+    showView('shape');
+  }catch(err){ console.error(err); toast('Could not open that image.'); }
+  finally{ busy(false); }
+}
+
+function setupEditCanvas(){
+  editCanvas.width=sourceCanvas.width; editCanvas.height=sourceCanvas.height;
+}
+
+function defaultQuad(){
+  const w=sourceCanvas.width,h=sourceCanvas.height, m=.06;
+  return [
+    {x:w*m,y:h*m,corner:0},{x:w*(1-m),y:h*m,corner:1},
+    {x:w*(1-m),y:h*(1-m),corner:2},{x:w*m,y:h*(1-m),corner:3}
+  ];
+}
+
+function otsuThreshold(hist,total){
+  let sum=0; for(let i=0;i<256;i++) sum += i*hist[i];
+  let sumB=0,wB=0,maxVar=-1,thr=128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF=total-wB; if(!wF) break;
+    sumB += t*hist[t];
+    const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const v=wB*wF*(mB-mF)*(mB-mF);
+    if(v>maxVar){maxVar=v;thr=t;}
+  }
+  return thr;
+}
+
+function autoDetectDocument(){
+  try{
+    const max=360, sc=Math.min(1,max/Math.max(sourceCanvas.width,sourceCanvas.height));
+    const w=Math.max(2,Math.round(sourceCanvas.width*sc)), h=Math.max(2,Math.round(sourceCanvas.height*sc));
+    const c=document.createElement('canvas'); c.width=w;c.height=h; const cx=c.getContext('2d',{willReadFrequently:true});
+    cx.drawImage(sourceCanvas,0,0,w,h);
+    const data=cx.getImageData(0,0,w,h).data;
+    const gray=new Uint8Array(w*h), hist=new Uint32Array(256);
+    let centerSum=0,centerN=0,borderSum=0,borderN=0;
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      const i=(y*w+x)*4; const g=Math.round(.299*data[i]+.587*data[i+1]+.114*data[i+2]); gray[y*w+x]=g;hist[g]++;
+      const border=x<w*.12||x>w*.88||y<h*.12||y>h*.88;
+      const center=x>w*.25&&x<w*.75&&y>h*.25&&y<h*.75;
+      if(border){borderSum+=g;borderN++;} if(center){centerSum+=g;centerN++;}
+    }
+    let thr=otsuThreshold(hist,w*h);
+    const brightForeground=(centerSum/centerN) >= (borderSum/borderN);
+    const mask=new Uint8Array(w*h);
+    for(let i=0;i<mask.length;i++) mask[i]=brightForeground ? (gray[i]>thr?1:0) : (gray[i]<thr?1:0);
+    // Ignore a 1px frame; it often contains camera/background artifacts.
+    for(let x=0;x<w;x++){mask[x]=0;mask[(h-1)*w+x]=0;} for(let y=0;y<h;y++){mask[y*w]=0;mask[y*w+w-1]=0;}
+
+    const seen=new Uint8Array(w*h); let best=[];
+    const stack=new Int32Array(w*h);
+    for(let y=1;y<h-1;y+=2) for(let x=1;x<w-1;x+=2){
+      const seed=y*w+x; if(!mask[seed]||seen[seed]) continue;
+      let top=0, n=0; stack[top++]=seed; seen[seed]=1; const comp=[];
+      while(top){
+        const p=stack[--top]; comp.push(p); n++;
+        const px=p%w, py=(p/w)|0;
+        const neigh=[p-1,p+1,p-w,p+w];
+        for(const q of neigh){ if(q<0||q>=mask.length||seen[q]||!mask[q]) continue; const qx=q%w,qy=(q/w)|0; if(qx===0||qx===w-1||qy===0||qy===h-1) continue; seen[q]=1; stack[top++]=q; }
+      }
+      if(comp.length>best.length) best=comp;
+    }
+    if(best.length < w*h*.05) return defaultQuad();
+    let tl=null,tr=null,br=null,bl=null,minSum=1e9,maxSum=-1e9,maxDiff=-1e9,minDiff=1e9;
+    for(const p of best){ const x=p%w,y=(p/w)|0,s=x+y,d=x-y; if(s<minSum){minSum=s;tl={x,y}} if(s>maxSum){maxSum=s;br={x,y}} if(d>maxDiff){maxDiff=d;tr={x,y}} if(d<minDiff){minDiff=d;bl={x,y}} }
+    if(!tl||!tr||!br||!bl) return defaultQuad();
+    const inv=1/sc;
+    const q=[{...tl,corner:0},{...tr,corner:1},{...br,corner:2},{...bl,corner:3}].map(p=>({x:clamp(p.x*inv,0,sourceCanvas.width-1),y:clamp(p.y*inv,0,sourceCanvas.height-1),corner:p.corner}));
+    const area=Math.abs(polygonArea(q));
+    if(area < sourceCanvas.width*sourceCanvas.height*.12) return defaultQuad();
+    return q;
+  }catch(e){ console.warn('Auto detect fallback',e); return defaultQuad(); }
+}
+
+function polygonArea(ps){let a=0;for(let i=0;i<ps.length;i++){const p=ps[i],q=ps[(i+1)%ps.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
+
+function renderEditor(){
+  ectx.clearRect(0,0,editCanvas.width,editCanvas.height); ectx.drawImage(sourceCanvas,0,0);
+  ectx.save();
+  ectx.fillStyle='rgba(0,0,0,.42)'; ectx.beginPath(); ectx.rect(0,0,editCanvas.width,editCanvas.height);
+  ectx.moveTo(points[0].x,points[0].y); for(let i=1;i<points.length;i++) ectx.lineTo(points[i].x,points[i].y); ectx.closePath();
+  ectx.fill('evenodd');
+  ectx.lineJoin='round'; ectx.lineCap='round'; ectx.strokeStyle='#63d7ff'; ectx.lineWidth=Math.max(4,editCanvas.width/400);
+  ectx.beginPath(); points.forEach((p,i)=>i?ectx.lineTo(p.x,p.y):ectx.moveTo(p.x,p.y)); ectx.closePath(); ectx.stroke();
+  const r=Math.max(13,editCanvas.width/90);
+  points.forEach((p,i)=>{
+    ectx.beginPath(); ectx.arc(p.x,p.y,p.corner!==undefined?r*1.08:r,0,Math.PI*2);
+    ectx.fillStyle=p.corner!==undefined?'#ff7a1a':'#63d7ff'; ectx.fill(); ectx.lineWidth=Math.max(3,editCanvas.width/600); ectx.strokeStyle='#fff'; ectx.stroke();
+  });
+  ectx.restore();
+}
+
+function eventToCanvas(ev){
+  const rect=editCanvas.getBoundingClientRect(); return {x:(ev.clientX-rect.left)*editCanvas.width/rect.width,y:(ev.clientY-rect.top)*editCanvas.height/rect.height};
+}
+function nearestPoint(pos){let best=-1,bd=Infinity;points.forEach((p,i)=>{const d=Math.hypot(p.x-pos.x,p.y-pos.y);if(d<bd){bd=d;best=i}});const rect=editCanvas.getBoundingClientRect();const threshold=38*editCanvas.width/rect.width;return bd<threshold?best:-1;}
+function pointSegDistance(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;if(!l2)return {d:Math.hypot(p.x-a.x,p.y-a.y),t:0};let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/l2;t=clamp(t,0,1);const x=a.x+t*dx,y=a.y+t*dy;return {d:Math.hypot(p.x-x,p.y-y),t,x,y};}
+function addPointAt(pos){
+  let best={d:Infinity,i:-1,x:pos.x,y:pos.y};
+  for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],r=pointSegDistance(pos,a,b);if(r.d<best.d)best={...r,i};}
+  const rect=editCanvas.getBoundingClientRect(); const maxD=55*editCanvas.width/rect.width;
+  if(best.d>maxD){toast('Tap closer to the blue edge.');return;}
+  const np={x:best.x,y:best.y}; history.push(points.map(p=>({...p}))); points.splice(best.i+1,0,np); renderEditor();
+}
+function showLoupe(p,ev){
+  const size=120, zoom=2.6; lctx.clearRect(0,0,160,160);
+  const sx=clamp(p.x-size/(2*zoom),0,sourceCanvas.width),sy=clamp(p.y-size/(2*zoom),0,sourceCanvas.height);
+  lctx.imageSmoothingEnabled=true; lctx.drawImage(sourceCanvas,sx,sy,size/zoom,size/zoom,0,0,160,160);
+  const stage=$('shapeView').querySelector('.stage-wrap').getBoundingClientRect();
+  let left=ev.clientX-stage.left-82, top=ev.clientY-stage.top-205; left=clamp(left,4,stage.width-168); if(top<4) top=ev.clientY-stage.top+45;
+  loupe.style.left=left+'px'; loupe.style.top=clamp(top,4,stage.height-168)+'px'; loupe.classList.remove('hidden');
+}
+
+editCanvas.addEventListener('pointerdown',ev=>{ev.preventDefault();editCanvas.setPointerCapture(ev.pointerId);const p=eventToCanvas(ev);draggedIndex=nearestPoint(p);pointerMoved=false;downPos=p;if(draggedIndex>=0){history.push(points.map(q=>({...q})));showLoupe(points[draggedIndex],ev);}});
+editCanvas.addEventListener('pointermove',ev=>{if(draggedIndex<0)return;ev.preventDefault();const p=eventToCanvas(ev);if(Math.hypot(p.x-downPos.x,p.y-downPos.y)>3)pointerMoved=true;points[draggedIndex].x=clamp(p.x,0,editCanvas.width-1);points[draggedIndex].y=clamp(p.y,0,editCanvas.height-1);renderEditor();showLoupe(points[draggedIndex],ev);});
+editCanvas.addEventListener('pointerup',ev=>{ev.preventDefault();loupe.classList.add('hidden');if(draggedIndex<0){const p=eventToCanvas(ev);if(!pointerMoved)addPointAt(p);}draggedIndex=-1;});
+editCanvas.addEventListener('pointercancel',()=>{loupe.classList.add('hidden');draggedIndex=-1;});
+
+function getEdgePoints(cornerA,cornerB){
+  const ia=points.findIndex(p=>p.corner===cornerA), ib=points.findIndex(p=>p.corner===cornerB); if(ia<0||ib<0)return [];
+  const out=[]; let i=ia; while(true){out.push(points[i]);if(i===ib)break;i=(i+1)%points.length;if(out.length>points.length+1)break;} return out;
+}
+function polyLength(ps){let s=0;for(let i=1;i<ps.length;i++)s+=Math.hypot(ps[i].x-ps[i-1].x,ps[i].y-ps[i-1].y);return s;}
+function samplePolyline(ps,t){
+  if(ps.length===1)return ps[0]; const lens=[];let total=0;for(let i=1;i<ps.length;i++){const l=Math.hypot(ps[i].x-ps[i-1].x,ps[i].y-ps[i-1].y);lens.push(l);total+=l;} if(total<1)return ps[0];
+  let target=t*total,acc=0;for(let i=0;i<lens.length;i++){if(target<=acc+lens[i]||i===lens.length-1){const f=lens[i]?((target-acc)/lens[i]):0;return{x:ps[i].x+(ps[i+1].x-ps[i].x)*f,y:ps[i].y+(ps[i+1].y-ps[i].y)*f};}acc+=lens[i];}return ps[ps.length-1];
+}
+
+function makeCorrected(){
+  const top=getEdgePoints(0,1), right=getEdgePoints(1,2), bottom=getEdgePoints(2,3), left=getEdgePoints(3,0);
+  if([top,right,bottom,left].some(e=>e.length<2)) throw new Error('Invalid perimeter');
+  const w0=(polyLength(top)+polyLength(bottom))/2, h0=(polyLength(left)+polyLength(right))/2;
+  const maxOut=2000, scale=Math.min(1,maxOut/Math.max(w0,h0));
+  const W=Math.max(320,Math.round(w0*scale)), H=Math.max(320,Math.round(h0*scale));
+  workingCanvas.width=W;workingCanvas.height=H;
+  const src=sctx.getImageData(0,0,sourceCanvas.width,sourceCanvas.height), sd=src.data;
+  const out=wctx.createImageData(W,H), od=out.data, sw=sourceCanvas.width,sh=sourceCanvas.height;
+  const topX=new Float32Array(W),topY=new Float32Array(W),botX=new Float32Array(W),botY=new Float32Array(W);
+  const leftX=new Float32Array(H),leftY=new Float32Array(H),rightX=new Float32Array(H),rightY=new Float32Array(H);
+  for(let x=0;x<W;x++){const u=x/(W-1),a=samplePolyline(top,u),b=samplePolyline(bottom,1-u);topX[x]=a.x;topY[x]=a.y;botX[x]=b.x;botY[x]=b.y;}
+  for(let y=0;y<H;y++){const v=y/(H-1),l=samplePolyline(left,1-v),r=samplePolyline(right,v);leftX[y]=l.x;leftY[y]=l.y;rightX[y]=r.x;rightY[y]=r.y;}
+  const TL=points.find(p=>p.corner===0),TR=points.find(p=>p.corner===1),BR=points.find(p=>p.corner===2),BL=points.find(p=>p.corner===3);
+  let oi=0;
+  for(let y=0;y<H;y++){
+    const v=y/(H-1),lvx=leftX[y],lvy=leftY[y],rvx=rightX[y],rvy=rightY[y];
+    for(let x=0;x<W;x++){
+      const u=x/(W-1);
+      const bilx=(1-u)*(1-v)*TL.x+u*(1-v)*TR.x+(1-u)*v*BL.x+u*v*BR.x;
+      const bily=(1-u)*(1-v)*TL.y+u*(1-v)*TR.y+(1-u)*v*BL.y+u*v*BR.y;
+      let sx=(1-v)*topX[x]+v*botX[x]+(1-u)*lvx+u*rvx-bilx;
+      let sy=(1-v)*topY[x]+v*botY[x]+(1-u)*lvy+u*rvy-bily;
+      sx=clamp(sx,0,sw-1.001);sy=clamp(sy,0,sh-1.001);
+      const x0=sx|0,y0=sy|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=sx-x0,fy=sy-y0;
+      const i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;
+      for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;}od[oi+3]=255;oi+=4;
+    }
+  }
+  wctx.putImageData(out,0,0); return out;
+}
+
+function cleanupImage(img){
+  const W=img.width,H=img.height,src=img.data,out=new ImageData(new Uint8ClampedArray(src),W,H),d=out.data;
+  // Coarse illumination map: block-average luminance, then smooth on the grid.
+  const step=Math.max(12,Math.round(Math.max(W,H)/120)); const gw=Math.ceil(W/step),gh=Math.ceil(H/step); let grid=new Float32Array(gw*gh),cnt=new Uint32Array(gw*gh);
+  for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){const i=(y*W+x)*4,g=Math.floor(x/step),r=Math.floor(y/step),k=r*gw+g;grid[k]+=.299*src[i]+.587*src[i+1]+.114*src[i+2];cnt[k]++;}
+  for(let i=0;i<grid.length;i++)grid[i]=cnt[i]?grid[i]/cnt[i]:220;
+  for(let pass=0;pass<3;pass++){const ng=new Float32Array(grid.length);for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){let s=0,n=0;for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){s+=grid[yy*gw+xx];n++;}ng[y*gw+x]=s/n;}grid=ng;}
+  let p=0;
+  for(let y=0;y<H;y++){
+    const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
+    for(let x=0;x<W;x++,p+=4){const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,b=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,illum=a*(1-fy)+b*fy;const gain=clamp(225/Math.max(illum,45),.68,2.15);
+      for(let c=0;c<3;c++){let v=src[p+c]*gain;v=(v-128)*1.08+128;if(v>210)v=210+(v-210)*1.35;d[p+c]=clamp(v,0,255);}d[p+3]=255;}
+  }
+  return out;
+}
+
+function blackWhiteImage(img){
+  const W=img.width,H=img.height,s=img.data,out=new ImageData(W,H),d=out.data;
+  // Local threshold using coarse luminance blocks to keep shadows from turning gray.
+  const step=Math.max(16,Math.round(Math.max(W,H)/100)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),grid=new Float32Array(gw*gh),cnt=new Uint32Array(gw*gh);
+  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){const i=(y*W+x)*4,k=Math.floor(y/step)*gw+Math.floor(x/step);grid[k]+=.299*s[i]+.587*s[i+1]+.114*s[i+2];cnt[k]++;}
+  for(let i=0;i<grid.length;i++)grid[i]=cnt[i]?grid[i]/cnt[i]:200;
+  let p=0;for(let y=0;y<H;y++){for(let x=0;x<W;x++,p+=4){const g=.299*s[p]+.587*s[p+1]+.114*s[p+2],local=grid[Math.min(gh-1,Math.floor(y/step))*gw+Math.min(gw-1,Math.floor(x/step))],t=local-26;const v=g>t?255:0;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255;}}return out;
+}
+
+function displayImage(img){resultCanvas.width=img.width;resultCanvas.height=img.height;rctx.putImageData(img,0,0);}
+async function runCorrection(){
+  if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
+  try{correctedOriginal=makeCorrected();cleanedImage=null;bwImage=null;currentMode='original';displayImage(correctedOriginal);setModeButtons();showView('result');}
+  catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
+  finally{busy(false);}
+}
+async function setMode(mode){
+  currentMode=mode;busy(true,mode==='clean'?'Removing shadows…':mode==='bw'?'Making scan…':'Loading…');await new Promise(r=>setTimeout(r,30));
+  try{if(mode==='original')displayImage(correctedOriginal);else if(mode==='clean'){cleanedImage ||= cleanupImage(correctedOriginal);displayImage(cleanedImage);}else{cleanedImage ||= cleanupImage(correctedOriginal);bwImage ||= blackWhiteImage(cleanedImage);displayImage(bwImage);}setModeButtons();}finally{busy(false);}
+}
+function setModeButtons(){[$('originalModeBtn'),$('cleanModeBtn'),$('bwModeBtn')].forEach(b=>b.classList.remove('active'));$(currentMode==='original'?'originalModeBtn':currentMode==='clean'?'cleanModeBtn':'bwModeBtn').classList.add('active');}
+
+function rotateSource(){
+  const c=document.createElement('canvas');c.width=sourceCanvas.height;c.height=sourceCanvas.width;const cx=c.getContext('2d');cx.translate(c.width,0);cx.rotate(Math.PI/2);cx.drawImage(sourceCanvas,0,0);
+  sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=autoDetectDocument();history=[];renderEditor();
+}
+
+function downloadCanvas(type='image/png'){
+  resultCanvas.toBlob(blob=>{if(!blob)return;const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${currentFileBase}-corrected.${type==='image/png'?'png':'jpg'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Saved to your downloads.');},type,type==='image/jpeg'?.94:undefined);
+}
+async function shareCanvas(){
+  resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'Corrected document'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
+}
+
+$('cameraInput').addEventListener('change',e=>loadFile(e.target.files[0]));$('galleryInput').addEventListener('change',e=>loadFile(e.target.files[0]));
+$('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();renderEditor();toast('Document edge re-detected.');});
+$('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();renderEditor();});
+$('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();renderEditor();}else toast('Nothing to undo yet.');});
+$('rotateBtn').addEventListener('click',()=>rotateSource());$('correctBtn').addEventListener('click',runCorrection);
+$('backShapeBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
+$('originalModeBtn').addEventListener('click',()=>setMode('original'));$('cleanModeBtn').addEventListener('click',()=>setMode('clean'));$('bwModeBtn').addEventListener('click',()=>setMode('bw'));
+$('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
+$('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
+
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
