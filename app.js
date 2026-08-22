@@ -15,9 +15,12 @@ let draggedIndex = -1;
 let pointerMoved = false;
 let downPos = null;
 let correctedOriginal = null;
-let cleanedImage = null;
+let aiAssistImage = null;
+let adjustedImage = null;
 let bwImage = null;
 let currentMode = 'original';
+let adjustTimer = null;
+const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
 let history = [];
 let currentFileBase = 'document';
 let selectedIndex = -1;
@@ -33,6 +36,7 @@ const MAX_ZOOM = 5;
 function showView(name){
   Object.values(views).forEach(v=>v.classList.remove('active'));
   views[name].classList.add('active');
+  document.body.classList.toggle('result-mode', name==='result');
   if(name!=='shape') hidePointActions();
   window.scrollTo(0,0);
 }
@@ -351,24 +355,78 @@ function makeCorrected(){
 }
 
 function cleanupImage(img){
+  // Non-generative "AI Assist" style polish: estimate the paper illumination
+  // from bright local pixels, smooth that estimate, then normalize broad shadows.
   const W=img.width,H=img.height,src=img.data,out=new ImageData(new Uint8ClampedArray(src),W,H),d=out.data;
-  // Coarse illumination map: block-average luminance, then smooth on the grid.
-  const step=Math.max(12,Math.round(Math.max(W,H)/120)); const gw=Math.ceil(W/step),gh=Math.ceil(H/step); let grid=new Float32Array(gw*gh),cnt=new Uint32Array(gw*gh);
-  for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){const i=(y*W+x)*4,g=Math.floor(x/step),r=Math.floor(y/step),k=r*gw+g;grid[k]+=.299*src[i]+.587*src[i+1]+.114*src[i+2];cnt[k]++;}
-  for(let i=0;i<grid.length;i++)grid[i]=cnt[i]?grid[i]/cnt[i]:220;
-  for(let pass=0;pass<3;pass++){const ng=new Float32Array(grid.length);for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){let s=0,n=0;for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){s+=grid[yy*gw+xx];n++;}ng[y*gw+x]=s/n;}grid=ng;}
+  const step=Math.max(18,Math.round(Math.max(W,H)/82)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), bins=24;
+  const hist=new Uint32Array(gw*gh*bins), counts=new Uint32Array(gw*gh);
+  for(let y=0;y<H;y+=3) for(let x=0;x<W;x+=3){
+    const i=(y*W+x)*4, lum=.299*src[i]+.587*src[i+1]+.114*src[i+2], cell=Math.floor(y/step)*gw+Math.floor(x/step), b=Math.min(bins-1,Math.floor(lum*bins/256));
+    hist[cell*bins+b]++; counts[cell]++;
+  }
+  let grid=new Float32Array(gw*gh);
+  for(let c=0;c<grid.length;c++){
+    const target=Math.max(1,Math.ceil(counts[c]*.82)); let acc=0,b=bins-1;
+    // Find roughly the 82nd percentile from the dark side; this tracks paper rather than ink.
+    for(b=0;b<bins;b++){acc+=hist[c*bins+b]; if(acc>=target)break;}
+    grid[c]=((Math.min(b,bins-1)+.5)*256/bins);
+  }
+  for(let pass=0;pass<4;pass++){
+    const ng=new Float32Array(grid.length);
+    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){
+      let sum=0,weight=0;
+      for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
+        const dx=xx-x,dy=yy-y,wgt=(dx===0&&dy===0)?3:1;sum+=grid[yy*gw+xx]*wgt;weight+=wgt;
+      }
+      ng[y*gw+x]=sum/weight;
+    }
+    grid=ng;
+  }
+  const targetPaper=238;
   let p=0;
   for(let y=0;y<H;y++){
-    const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
-    for(let x=0;x<W;x++,p+=4){const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,b=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,illum=a*(1-fy)+b*fy;const gain=clamp(225/Math.max(illum,45),.68,2.15);
-      for(let c=0;c<3;c++){let v=src[p+c]*gain;v=(v-128)*1.08+128;if(v>210)v=210+(v-210)*1.35;d[p+c]=clamp(v,0,255);}d[p+3]=255;}
+    const gy=y/step,y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
+    for(let x=0;x<W;x++,p+=4){
+      const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;
+      const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,b=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,illum=a*(1-fy)+b*fy;
+      const gain=clamp(targetPaper/Math.max(illum,70),.82,1.52);
+      for(let c=0;c<3;c++){
+        let v=src[p+c]*gain;
+        v=(v-128)*1.045+128;
+        if(v>225)v=225+(v-225)*1.18;
+        d[p+c]=clamp(v,0,255);
+      }
+      d[p+3]=255;
+    }
+  }
+  return out;
+}
+
+function applyAdjustments(img, a=adjustments){
+  const W=img.width,H=img.height,s=img.data,out=new ImageData(W,H),d=out.data;
+  const brightness=a.brightness*1.25;
+  const contrast=Math.pow(1.012, a.contrast);
+  const saturation=Math.max(0,1+a.saturation/100);
+  const blackInput=a.black>0 ? a.black*.70 : 0;
+  const blackOutput=a.black<0 ? (-a.black)*.55 : 0;
+  const whiteInput=a.white>0 ? 255-a.white*.70 : 255;
+  const whiteOutput=a.white<0 ? 255+a.white*.55 : 255;
+  const inputSpan=Math.max(24,whiteInput-blackInput), outputSpan=Math.max(24,whiteOutput-blackOutput);
+  for(let p=0;p<s.length;p+=4){
+    let r=s[p],g=s[p+1],b=s[p+2];
+    const lum=.299*r+.587*g+.114*b;
+    r=lum+(r-lum)*saturation;g=lum+(g-lum)*saturation;b=lum+(b-lum)*saturation;
+    r=(r-128)*contrast+128+brightness;g=(g-128)*contrast+128+brightness;b=(b-128)*contrast+128+brightness;
+    r=blackOutput+((r-blackInput)/inputSpan)*outputSpan;
+    g=blackOutput+((g-blackInput)/inputSpan)*outputSpan;
+    b=blackOutput+((b-blackInput)/inputSpan)*outputSpan;
+    d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255;
   }
   return out;
 }
 
 function blackWhiteImage(img){
   const W=img.width,H=img.height,s=img.data,out=new ImageData(W,H),d=out.data;
-  // Local threshold using coarse luminance blocks to keep shadows from turning gray.
   const step=Math.max(16,Math.round(Math.max(W,H)/100)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),grid=new Float32Array(gw*gh),cnt=new Uint32Array(gw*gh);
   for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){const i=(y*W+x)*4,k=Math.floor(y/step)*gw+Math.floor(x/step);grid[k]+=.299*s[i]+.587*s[i+1]+.114*s[i+2];cnt[k]++;}
   for(let i=0;i<grid.length;i++)grid[i]=cnt[i]?grid[i]/cnt[i]:200;
@@ -376,17 +434,54 @@ function blackWhiteImage(img){
 }
 
 function displayImage(img){resultCanvas.width=img.width;resultCanvas.height=img.height;rctx.putImageData(img,0,0);}
+function resetAdjustments(render=false){
+  Object.keys(adjustments).forEach(k=>adjustments[k]=0);
+  const ids={brightness:'brightnessSlider',contrast:'contrastSlider',saturation:'saturationSlider',black:'blackSlider',white:'whiteSlider'};
+  for(const [k,id] of Object.entries(ids)){const el=$(id);if(el)el.value=0;const out=$(k+'Value');if(out)out.value='0';}
+  adjustedImage=null;
+  if(render&&currentMode==='adjust'&&correctedOriginal){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+}
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();cleanedImage=null;bwImage=null;currentMode='original';displayImage(correctedOriginal);setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();aiAssistImage=null;adjustedImage=null;bwImage=null;currentMode='original';resetAdjustments(false);displayImage(correctedOriginal);setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
 async function setMode(mode){
-  currentMode=mode;busy(true,mode==='clean'?'Removing shadows…':mode==='bw'?'Making scan…':'Loading…');await new Promise(r=>setTimeout(r,30));
-  try{if(mode==='original')displayImage(correctedOriginal);else if(mode==='clean'){cleanedImage ||= cleanupImage(correctedOriginal);displayImage(cleanedImage);}else{cleanedImage ||= cleanupImage(correctedOriginal);bwImage ||= blackWhiteImage(cleanedImage);displayImage(bwImage);}setModeButtons();}finally{busy(false);}
+  currentMode=mode;
+  $('adjustPanel').classList.toggle('hidden',mode!=='adjust');
+  $('aiAssistPanel').classList.toggle('hidden',mode!=='assist');
+  if(mode==='assist'&&!aiAssistImage){busy(true,'Polishing shadows & lighting…');await new Promise(r=>setTimeout(r,35));}
+  else if(mode==='bw'&&!bwImage){busy(true,'Making scan…');await new Promise(r=>setTimeout(r,30));}
+  try{
+    if(mode==='original') displayImage(correctedOriginal);
+    else if(mode==='adjust') {adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+    else if(mode==='assist') {aiAssistImage ||= cleanupImage(correctedOriginal);displayImage(aiAssistImage);}
+    else {aiAssistImage ||= cleanupImage(correctedOriginal);bwImage ||= blackWhiteImage(aiAssistImage);displayImage(bwImage);}
+    setModeButtons();
+  }finally{busy(false);}
 }
-function setModeButtons(){[$('originalModeBtn'),$('cleanModeBtn'),$('bwModeBtn')].forEach(b=>b.classList.remove('active'));$(currentMode==='original'?'originalModeBtn':currentMode==='clean'?'cleanModeBtn':'bwModeBtn').classList.add('active');}
+function setModeButtons(){
+  const map={original:'originalModeBtn',adjust:'adjustModeBtn',assist:'aiAssistModeBtn',bw:'bwModeBtn'};
+  Object.values(map).forEach(id=>$(id).classList.remove('active'));
+  $(map[currentMode]||map.original).classList.add('active');
+  $('adjustPanel').classList.toggle('hidden',currentMode!=='adjust');
+  $('aiAssistPanel').classList.toggle('hidden',currentMode!=='assist');
+}
+
+function scheduleAdjustmentRender(){
+  const map={brightness:'brightnessSlider',contrast:'contrastSlider',saturation:'saturationSlider',black:'blackSlider',white:'whiteSlider'};
+  for(const [k,id] of Object.entries(map)){
+    adjustments[k]=Number($(id).value)||0;
+    $(k+'Value').value=(adjustments[k]>0?'+':'')+adjustments[k];
+  }
+  clearTimeout(adjustTimer);
+  adjustTimer=setTimeout(()=>{
+    if(currentMode!=='adjust'||!correctedOriginal)return;
+    adjustedImage=applyAdjustments(correctedOriginal);
+    displayImage(adjustedImage);
+  },65);
+}
 
 function rotateSource(){
   const c=document.createElement('canvas');c.width=sourceCanvas.height;c.height=sourceCanvas.width;const cx=c.getContext('2d');cx.translate(c.width,0);cx.rotate(Math.PI/2);cx.drawImage(sourceCanvas,0,0);
@@ -405,8 +500,13 @@ $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})))
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());$('correctBtn').addEventListener('click',runCorrection);
-$('backShapeBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
-$('originalModeBtn').addEventListener('click',()=>setMode('original'));$('cleanModeBtn').addEventListener('click',()=>setMode('clean'));$('bwModeBtn').addEventListener('click',()=>setMode('bw'));
+$('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
+$('originalModeBtn').addEventListener('click',()=>setMode('original'));
+$('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
+$('aiAssistModeBtn').addEventListener('click',()=>setMode('assist'));
+$('bwModeBtn').addEventListener('click',()=>setMode('bw'));
+['brightnessSlider','contrastSlider','saturationSlider','blackSlider','whiteSlider'].forEach(id=>$(id).addEventListener('input',scheduleAdjustmentRender));
+$('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
 

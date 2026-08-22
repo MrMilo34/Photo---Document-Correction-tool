@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#101317" />
+  <meta name="theme-color" content="#090c12" />
   <title>Document Corrector</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
@@ -12,9 +12,10 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
+    <button id="headerBackBtn" class="header-back" aria-label="Back to editing">←</button>
+    <div class="export-heading">
       <div class="brand">Document Corrector</div>
-      <div class="sub">Original pixels. Better geometry.</div>
+      <div class="sub">Polish &amp; export</div>
     </div>
     <button id="aboutBtn" class="icon-btn" aria-label="About">ⓘ</button>
   </header>
@@ -22,13 +23,9 @@
   <main>
     <section id="homeView" class="view active home-view">
       <div class="hero-card">
-        <div class="doc-mark" aria-hidden="true">
-          <span class="corner tl"></span><span class="corner tr"></span>
-          <span class="corner bl"></span><span class="corner br"></span>
-          <div class="paper-lines"></div>
-        </div>
+        <img class="home-icon" src="icons/icon-192.png" alt="" aria-hidden="true" />
         <h1>Scan. Shape. Correct.</h1>
-        <p>Photograph a document, trace its real perimeter, flatten it, then remove uneven lighting without reimagining the contents.</p>
+        <p>Photograph a document, trace its real perimeter, flatten it, then polish the photographed pixels without rebuilding the contents.</p>
       </div>
 
       <div class="home-actions">
@@ -42,7 +39,7 @@
 
       <div class="integrity-card">
         <div class="shield">🔒</div>
-        <div><strong>Document Integrity Mode</strong><br><span>No generated text. No guessed VINs. No rebuilt logos. Correction is performed on the photographed pixels.</span></div>
+        <div><strong>Document Integrity Mode</strong><br><span>No generated text. No guessed VINs. No rebuilt logos. Corrections stay tied to the original photographed pixels.</span></div>
       </div>
     </section>
 
@@ -66,26 +63,65 @@
       <button id="correctBtn" class="primary bottom-action shape-ui">CORRECT DOCUMENT</button>
     </section>
 
-    <section id="resultView" class="view">
+    <section id="resultView" class="view result-view">
       <div class="result-stage"><canvas id="resultCanvas"></canvas></div>
+
       <div class="mode-row">
         <button id="originalModeBtn" class="seg active">Corrected</button>
-        <button id="cleanModeBtn" class="seg">Clean</button>
+        <button id="adjustModeBtn" class="seg">Adjust</button>
+        <button id="aiAssistModeBtn" class="seg ai-seg">✦ AI Assist</button>
         <button id="bwModeBtn" class="seg">B&amp;W</button>
       </div>
+
+      <section id="adjustPanel" class="adjust-panel hidden" aria-label="Image adjustments">
+        <div class="adjust-head">
+          <div>
+            <strong>Image Adjustments</strong>
+            <span>Fine tune the corrected pixels.</span>
+          </div>
+          <button id="resetAdjustBtn" class="reset-adjust">Reset</button>
+        </div>
+
+        <label class="slider-row">
+          <span>Brightness <output id="brightnessValue">0</output></span>
+          <input id="brightnessSlider" type="range" min="-100" max="100" value="0" step="1" />
+        </label>
+        <label class="slider-row">
+          <span>Contrast <output id="contrastValue">0</output></span>
+          <input id="contrastSlider" type="range" min="-100" max="100" value="0" step="1" />
+        </label>
+        <label class="slider-row">
+          <span>Saturation <output id="saturationValue">0</output></span>
+          <input id="saturationSlider" type="range" min="-100" max="100" value="0" step="1" />
+        </label>
+        <label class="slider-row">
+          <span>Black level <output id="blackValue">0</output></span>
+          <input id="blackSlider" type="range" min="-100" max="100" value="0" step="1" />
+        </label>
+        <label class="slider-row">
+          <span>White level <output id="whiteValue">0</output></span>
+          <input id="whiteSlider" type="range" min="-100" max="100" value="0" step="1" />
+        </label>
+      </section>
+
+      <section id="aiAssistPanel" class="assist-panel hidden">
+        <div class="assist-badge">✦</div>
+        <div><strong>AI Assist polish</strong><span>Reduces broad shadows and uneven lighting while preserving the original document pixels.</span></div>
+      </section>
+
       <div class="result-actions">
-        <button id="backShapeBtn">← Shape</button>
         <button id="shareBtn">↗ Share</button>
         <button id="savePngBtn" class="primary">Save PNG</button>
       </div>
-      <p class="safe-note">Cleanup adjusts lighting, contrast and geometry only. It does not generate replacement document content.</p>
+      <p class="safe-note">AI Assist is a non-generative polish pass. It may adjust lighting, colour and contrast, but it never recreates text, numbers, barcodes or logos.</p>
     </section>
   </main>
 
   <dialog id="aboutDialog">
-    <h2>Document Corrector v0.2</h2>
-    <p>Document Corrector uses deterministic image processing. The perimeter points define the true page boundary; the interior is dewarped from those points using a curved-surface mapping.</p>
-    <p><strong>v0.2:</strong> Pinch to zoom, tap existing points to select them, use precision Move / Remove controls, and tap empty edge sections to add new points.</p>
+    <h2>Document Corrector v0.3</h2>
+    <p>The perimeter points define the true page boundary and the app dewarps the photographed pixels into a flat document.</p>
+    <p><strong>AI Assist</strong> is intentionally non-generative. It estimates broad illumination and shadows, then corrects those pixels without inventing replacement document content.</p>
+    <p><strong>v0.3:</strong> cleaner full-screen editing, a dedicated Back to Edit control, adjustable brightness/contrast/saturation/black/white levels, and the new AI Assist polish pass.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 

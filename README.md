@@ -1,39 +1,47 @@
-# Document Corrector v0.2
+# Document Corrector v0.3
 
 A phone-first, installable document correction app. It runs locally in the browser/PWA and does not send document images to a server.
 
-## v0.2 editor changes
+## v0.3 changes
 
-- **Pinch to zoom** up to 5× for precise perimeter editing.
-- **Drag the image to pan** while zoomed in.
-- Taps near an existing point now **select that point first** instead of accidentally adding another point.
-- Tapping a point opens contextual controls on either side:
-  - **↔ Move** — press and drag for extra-slow precision movement.
-  - **✕ Remove** — removes user-added edge points. The four required corner points cannot be deleted.
-- Direct point dragging is intentionally slowed slightly for finer placement.
-- Tap an empty section of the blue perimeter to add a new point, as before.
-- **Undo Point** and **Rotate** remain available.
-- The editor controls fade away when zoomed in so the document stays uncluttered while doing precision work.
-- Updated blue / purple minimal interface and the new neon document-perimeter app icon.
+- The **Document Corrector header is hidden during capture and shape editing** so the document gets the full screen. It returns on the final polish/export page.
+- The export page now has a clear **← Back to Edit** arrow in the top-left.
+- Replaced the old **Clean** preset with a proper **Adjust** panel:
+  - Brightness
+  - Contrast
+  - Saturation
+  - Black level
+  - White level
+  - Reset
+- Added **✦ AI Assist** as a one-tap non-generative polish pass for broad shadows and uneven illumination.
+- **AI Assist never redraws document content.** It estimates lighting across the existing pixels and normalizes it; text, VINs, barcodes, logos and numbers are never reconstructed.
+- **B&W** remains available and now uses the shadow-polished image as its source.
+- Kept the v0.2 precision editor: pinch zoom, pan, nearby-point selection priority, Move / Remove controls, slow point movement, undo, rotate, and auto detection.
+- Kept the locked neon blue/purple perimeter-mesh app icon.
 
 ## Workflow
 
 1. Take a photo or choose one from the phone.
 2. The app makes a rough four-corner document guess.
 3. Drag the corner points into place.
-4. Tap blue edge sections to add perimeter points where the page bows or curves.
-5. Pinch to zoom for close work. Tap an existing point to select it, or use **↔ Move** for very fine adjustment.
+4. Tap edge sections to add perimeter points where the page bows or curves.
+5. Pinch to zoom for precision work. Tap an existing point to select it.
 6. Tap **CORRECT DOCUMENT**.
-7. Choose **Corrected**, **Clean**, or **B&W**.
-8. Save or share the result.
+7. On the export page choose:
+   - **Corrected** — untouched corrected pixels.
+   - **Adjust** — manual image-editor controls.
+   - **AI Assist** — local shadow/lighting polish.
+   - **B&W** — high-contrast document scan.
+8. Use the top-left arrow to return to editing at any time.
+9. Share or save the current version as PNG.
 
 ## Document integrity rule
 
-This app uses geometry and deterministic image processing. It does **not** use generative image reconstruction. Cleanup changes lighting/contrast and maps the original photographed pixels into a flattened page. It does not guess VINs, rebuild text, or invent document content.
+Document Corrector does not use generative image reconstruction. Geometry, manual adjustments, AI Assist and B&W all operate on the photographed pixel data. If source text is blurry, the app does not guess what it should say.
 
 ## Updating the GitHub Pages copy
 
-Upload the contents of this folder to the **root of the same repository**, replacing the older files with the same names. Keep this structure:
+Upload the contents of this folder to the **root of the same repository**, replacing the older files with the same names:
 
 ```text
 index.html
@@ -48,10 +56,10 @@ icons/
   icon-source.png
 ```
 
-GitHub Pages can remain set to:
+Keep GitHub Pages set to:
 
 - Source: **Deploy from a branch**
 - Branch: **main**
 - Folder: **/(root)**
 
-The service worker cache name changed in v0.2, so the new app files should replace the old cached build automatically after GitHub Pages publishes the update. If Chrome still shows the old interface, close the installed app/browser tab completely and reopen it after a minute.
+The service-worker cache changes in each release. After GitHub finishes publishing, completely close the installed app/Chrome tab and reopen it if the old interface is still visible.

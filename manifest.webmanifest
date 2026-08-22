@@ -1,7 +1,7 @@
 {
   "name": "Document Corrector",
   "short_name": "Doc Corrector",
-  "description": "Perspective and curved-edge document correction without regenerating document contents.",
+  "description": "Perspective, curved-edge correction, manual image adjustments, and non-generative shadow polish for photographed documents.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",
