@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "DocMesh document correction with manual shape control, true grayscale, balanced Corrected cleanup, and a stronger full-colour AI Assisted restore mode.",
+  "description": "DocMesh document correction with manual shape control, true grayscale, balanced Corrected cleanup, stronger full-colour AI Assisted restoration, and a blurred live-camera home backdrop.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",

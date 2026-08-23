@@ -1,16 +1,13 @@
-# DocMesh v0.10
+# DocMesh v0.9.3
+
+Focused polish release.
 
 ## What changed
-- Fixes **AI Assisted** so it stays a strong **full-colour cleanup mode** instead of collapsing into a photocopy / black-and-white look.
-- Keeps the document closer to a cleaned screen image: brighter paper, lifted shadows, preserved coloured accents, and darker crisp text.
-- Keeps **Greyscale** as true smooth grayscale.
-- Tightens the circular AI icon treatment and updates the manifest icons to `maskable` to help avoid odd oval-looking badges in Android/PWA surfaces.
-- Keeps the geometry improvements from v0.8/v0.9.
+- AI Assisted retuned toward a cleaner **screen-like digital document** result instead of over-blown colour cleanup.
+- Stronger suppression of **glare, reflections and uneven lighting**.
+- Added a **blurred live rear-camera background** behind the home screen UI when permission is available.
+- Added a subtle **drop shadow** to the release label on the home screen.
+- Updated cache/version strings for a clean GitHub Pages refresh.
 
-## Notes
-- **Corrected** remains the safer balanced cleanup mode.
-- **AI Assisted** is now the strongest full-colour cleanup mode for difficult images.
-
-## Upload
-Replace the current repository files with the contents of this package.
-After deployment, confirm you can see **DocMesh v0.10** in About or **release v0.10** on the home screen.
+## Install
+Upload the full folder contents to your GitHub Pages repo root, wait a moment, then do a hard refresh or reinstall the app shortcut if needed.

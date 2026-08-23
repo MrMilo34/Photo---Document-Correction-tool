@@ -9,6 +9,9 @@ const stageWrap = $('stageWrap'), canvasPan = $('canvasPan'), canvasZoom = $('ca
 const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), removePointBtn = $('removePointBtn'), zoomChip = $('zoomChip');
 const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
+const homeBgVideo = $('homeBgVideo');
+let homeBgStream = null;
+let homeBgTried = false;
 
 let points = [];
 let draggedIndex = -1;
@@ -34,11 +37,36 @@ const EDGE_TAP_RADIUS_CSS = 46;
 const MAX_ZOOM = 5;
 
 
+async function startHomeCameraBg(){
+  if(!homeBgVideo || homeBgStream || homeBgTried || !navigator.mediaDevices?.getUserMedia) return;
+  homeBgTried = true;
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } },
+      audio:false
+    });
+    homeBgStream = stream;
+    homeBgVideo.srcObject = stream;
+    await homeBgVideo.play().catch(()=>{});
+  }catch(err){
+    console.warn('Home background camera unavailable', err);
+  }
+}
+function stopHomeCameraBg(){
+  if(!homeBgStream) return;
+  homeBgStream.getTracks().forEach(t=>t.stop());
+  homeBgStream = null;
+  if(homeBgVideo) homeBgVideo.srcObject = null;
+  homeBgTried = false;
+}
+
 function showView(name){
   Object.values(views).forEach(v=>v.classList.remove('active'));
   views[name].classList.add('active');
   document.body.classList.toggle('result-mode', name==='result');
   if(name!=='shape') hidePointActions();
+  if(name==='home') startHomeCameraBg();
+  else stopHomeCameraBg();
   window.scrollTo(0,0);
 }
 function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
@@ -449,38 +477,40 @@ function cleanupImage(img){
 
 
 function aggressiveCleanupImage(img){
-  // Strongest full-colour restoration mode.
-  // Goal: keep the document looking like a cleaned photo / screen image, not a photocopy.
+  // Strongest restoration mode aimed at a clean digital / print-screen style document.
+  // Still uses only the photographed pixels, but pushes illumination normalization harder.
   const base = cleanupImage(img);
   const W=base.width,H=base.height, src=base.data;
-  const step=Math.max(16,Math.round(Math.max(W,H)/88)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
-  const bgR=new Float32Array(count), bgG=new Float32Array(count), bgB=new Float32Array(count), bgW=new Float32Array(count);
+  const step=Math.max(18,Math.round(Math.max(W,H)/92)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
+  const bgR=new Float32Array(count), bgG=new Float32Array(count), bgB=new Float32Array(count), bgL=new Float32Array(count), bgW=new Float32Array(count);
 
   for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
     const i=(y*W+x)*4, r=src[i], g=src[i+1], b=src[i+2];
     const maxv=Math.max(r,g,b), minv=Math.min(r,g,b);
     const lum=.299*r+.587*g+.114*b;
     const sat=(maxv-minv)/Math.max(1,maxv);
-    // background weight prefers bright, low-saturation paper while still tolerating coloured paper slightly
-    const w=(Math.pow(clamp((lum-100)/150,0,1),1.2) * (1.15 - Math.min(.55,sat*0.9))) + 0.04;
+    const paperWeight=(Math.pow(clamp((lum-96)/148,0,1),1.25) * (1.15 - Math.min(.72,sat*1.05))) + 0.05;
     const cell=Math.floor(y/step)*gw+Math.floor(x/step);
-    bgR[cell]+=r*w; bgG[cell]+=g*w; bgB[cell]+=b*w; bgW[cell]+=w;
+    bgR[cell]+=r*paperWeight; bgG[cell]+=g*paperWeight; bgB[cell]+=b*paperWeight; bgL[cell]+=lum*paperWeight; bgW[cell]+=paperWeight;
   }
+  let meanR=246,meanG=246,meanB=246,meanL=246,sumW=0,sumR=0,sumG=0,sumB=0,sumL=0;
   for(let i=0;i<count;i++){
-    if(bgW[i]>.001){ bgR[i]/=bgW[i]; bgG[i]/=bgW[i]; bgB[i]/=bgW[i]; }
-    else { bgR[i]=246; bgG[i]=246; bgB[i]=246; }
+    if(bgW[i]>.001){ bgR[i]/=bgW[i]; bgG[i]/=bgW[i]; bgB[i]/=bgW[i]; bgL[i]/=bgW[i]; }
+    else { bgR[i]=246; bgG[i]=246; bgB[i]=246; bgL[i]=246; }
+    sumR+=bgR[i]; sumG+=bgG[i]; sumB+=bgB[i]; sumL+=bgL[i]; sumW++;
   }
+  meanR=sumR/sumW; meanG=sumG/sumW; meanB=sumB/sumW; meanL=sumL/sumW;
   for(let pass=0; pass<4; pass++){
-    const nR=new Float32Array(count), nG=new Float32Array(count), nB=new Float32Array(count);
+    const nR=new Float32Array(count), nG=new Float32Array(count), nB=new Float32Array(count), nL=new Float32Array(count);
     for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
-      let sr=0,sg=0,sb=0,w=0;
+      let sr=0,sg=0,sb=0,sl=0,w=0;
       for(let yy=Math.max(0,y-2); yy<=Math.min(gh-1,y+2); yy++) for(let xx=Math.max(0,x-2); xx<=Math.min(gw-1,x+2); xx++){
-        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?5:((Math.abs(dx)+Math.abs(dy)===1)?3:1);
-        sr+=bgR[idx]*wt; sg+=bgG[idx]*wt; sb+=bgB[idx]*wt; w+=wt;
+        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?6:((Math.abs(dx)+Math.abs(dy)===1)?3:1);
+        sr+=bgR[idx]*wt; sg+=bgG[idx]*wt; sb+=bgB[idx]*wt; sl+=bgL[idx]*wt; w+=wt;
       }
-      const idx=y*gw+x; nR[idx]=sr/w; nG[idx]=sg/w; nB[idx]=sb/w;
+      const idx=y*gw+x; nR[idx]=sr/w; nG[idx]=sg/w; nB[idx]=sb/w; nL[idx]=sl/w;
     }
-    bgR.set(nR); bgG.set(nG); bgB.set(nB);
+    bgR.set(nR); bgG.set(nG); bgB.set(nB); bgL.set(nL);
   }
 
   const normalized=new Uint8ClampedArray(src.length);
@@ -492,18 +522,36 @@ function aggressiveCleanupImage(img){
       const gx=x/step, x0=Math.min(gw-1,Math.floor(gx)), x1=Math.min(gw-1,x0+1), fx=gx-x0;
       const i00=y0*gw+x0, i10=y0*gw+x1, i01=y1*gw+x0, i11=y1*gw+x1;
       const interp=(arr)=>{const a=arr[i00]*(1-fx)+arr[i10]*fx, b=arr[i01]*(1-fx)+arr[i11]*fx; return a*(1-fy)+b*fy;};
-      const br=interp(bgR), bg=interp(bgG), bb=interp(bgB);
-      let r=src[p], g=src[p+1], b=src[p+2];
-      // illumination / cast normalization with restrained gains
-      const gl=clamp(248/Math.max(115,.299*br+.587*bg+.114*bb),0.9,1.45);
-      const gr=clamp(246/Math.max(122,br),0.9,1.38), gg=clamp(246/Math.max(122,bg),0.9,1.38), gb=clamp(246/Math.max(122,bb),0.9,1.38);
-      r=r*(gr*0.55+gl*0.45); g=g*(gg*0.55+gl*0.45); b=b*(gb*0.55+gl*0.45);
-      // gentle paper whitening without collapsing colours
+      const pr=interp(bgR), pg=interp(bgG), pb=interp(bgB), pl=interp(bgL);
+      const or=src[p], og=src[p+1], ob=src[p+2];
+      const origLum=.299*or+.587*og+.114*ob;
+      const paperLum=Math.max(110,pl);
+      const globalLift=clamp(248/Math.max(140,paperLum),0.96,1.28);
+      let r=or * globalLift * clamp(248/Math.max(120,pr),0.92,1.28);
+      let g=og * globalLift * clamp(248/Math.max(120,pg),0.92,1.28);
+      let b=ob * globalLift * clamp(248/Math.max(120,pb),0.92,1.28);
+      let lum=.299*r+.587*g+.114*b;
+      const maxv=Math.max(r,g,b), minv=Math.min(r,g,b);
+      const sat=(maxv-minv)/Math.max(1,maxv);
+      const paperMask=clamp((lum-164)/72,0,1) * (1-clamp((sat-0.16)/0.32,0,1));
+      const shadowLift=clamp((236-paperLum)/118,0,1);
+      const highlightMask=clamp((origLum-232)/20,0,1) * (1-clamp((sat-0.12)/0.26,0,1));
+      const whitePull=clamp(paperMask*(0.28+shadowLift*0.34) + highlightMask*0.55, 0, 0.82);
+      r = r*(1-whitePull) + 252*whitePull;
+      g = g*(1-whitePull) + 252*whitePull;
+      b = b*(1-whitePull) + 252*whitePull;
+      const inkMask=clamp((182-lum)/110,0,1);
+      const contrastBoost=1.03 + inkMask*0.08;
+      r=(r-128)*contrastBoost+128; g=(g-128)*contrastBoost+128; b=(b-128)*contrastBoost+128;
+      // Preserve true accents but prevent neon blow-outs.
       const avg=(r+g+b)/3;
-      const shadowLift=clamp((236-avg)/140,0,1);
-      r=(r-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
-      g=(g-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
-      b=(b-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
+      const colorKeep=clamp((sat-0.08)/0.26,0,1);
+      const satBoost=1.01 - highlightMask*0.03;
+      r=avg + (r-avg)*(1 + colorKeep*(satBoost-1));
+      g=avg + (g-avg)*(1 + colorKeep*(satBoost-1));
+      b=avg + (b-avg)*(1 + colorKeep*(satBoost-1));
+      // Clamp glare-prone colours so bright packaging doesn't blow out.
+      r=Math.min(r, 252); g=Math.min(g, 252); b=Math.min(b, 252);
       normalized[p]=clamp(r,0,255); normalized[p+1]=clamp(g,0,255); normalized[p+2]=clamp(b,0,255); normalized[p+3]=255;
       lumBuf[li]=.299*normalized[p]+.587*normalized[p+1]+.114*normalized[p+2];
     }
@@ -513,8 +561,7 @@ function aggressiveCleanupImage(img){
   p=0; li=0;
   for(let y=0;y<H;y++){
     for(let x=0;x<W;x++,p+=4,li++){
-      const i=p;
-      let r=normalized[i], g=normalized[i+1], b=normalized[i+2];
+      let r=normalized[p], g=normalized[p+1], b=normalized[p+2];
       const l=lumBuf[li];
       if(x>0&&x<W-1&&y>0&&y<H-1){
         for(const c of [0,1,2]){
@@ -522,30 +569,23 @@ function aggressiveCleanupImage(img){
           const blur=(up+dn+lf+rt)*0.25;
           let v=(c===0?r:(c===1?g:b));
           const edge=Math.abs(v-blur);
-          v = v + (v-blur) * (0.12 + Math.min(0.08, edge/255*0.18));
+          const sharpen=(0.09 + Math.min(0.08, edge/255*0.2));
+          v = v + (v-blur) * sharpen;
           if(c===0) r=v; else if(c===1) g=v; else b=v;
         }
       }
       const maxv=Math.max(r,g,b), minv=Math.min(r,g,b), sat=(maxv-minv)/Math.max(1,maxv);
-      const isColorAccent=sat>0.12 && l<250;
-      if(!isColorAccent){
-        // push near-paper pixels closer to white but keep ink dark
-        const ink=clamp((232-l)/120,0,1);
-        const whitePull=clamp((l-150)/105,0,1)*(1-ink*0.65);
-        r=r*(1-whitePull)+255*whitePull;
-        g=g*(1-whitePull)+255*whitePull;
-        b=b*(1-whitePull)+255*whitePull;
-      }else{
-        // preserve accents a touch better
-        const avg=(r+g+b)/3;
-        const boost=1.02;
-        r=avg + (r-avg)*boost; g=avg + (g-avg)*boost; b=avg + (b-avg)*boost;
+      const paperish=l>188 && sat<0.16;
+      if(paperish){
+        const pull=clamp((l-176)/88,0,1)*0.34;
+        r=r*(1-pull)+253*pull; g=g*(1-pull)+253*pull; b=b*(1-pull)+253*pull;
       }
-      d[i]=clamp(r,0,255); d[i+1]=clamp(g,0,255); d[i+2]=clamp(b,0,255); d[i+3]=255;
+      d[p]=clamp(r,0,255); d[p+1]=clamp(g,0,255); d[p+2]=clamp(b,0,255); d[p+3]=255;
     }
   }
   return out;
 }
+
 
 function applyAdjustments(img, a=adjustments){
   const W=img.width,H=img.height,s=img.data,out=new ImageData(W,H),d=out.data;
@@ -673,5 +713,8 @@ $('aiAssistModeBtn').addEventListener('click',()=>setMode('assist'));
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
+window.addEventListener('load',()=>{ if(views.home.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('pagehide', stopHomeCameraBg);
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.10', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.9.3', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
