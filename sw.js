@@ -1,13 +1,14 @@
-const CACHE = 'meshdoctor-v1.3.0';
+const CACHE = 'meshdoctor-v1.4.0';
 const CORE = [
   './',
   './index.html',
-  './styles.css?v=1.3',
-  './app.js?v=1.3',
-  './manifest.webmanifest?v=1.3',
-  './icons/icon-192.png?v=1.3',
-  './icons/icon-512.png?v=1.3',
-  './assets/home-splash.png?v=1.3'
+  './styles.css?v=1.4',
+  './app.js?v=1.4',
+  './config.js?v=1.4',
+  './manifest.webmanifest?v=1.4',
+  './icons/icon-192.png?v=1.4',
+  './icons/icon-512.png?v=1.4',
+  './assets/home-splash.png?v=1.4'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(()=>self.skipWaiting()));
@@ -18,6 +19,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const req = event.request;
+  if (new URL(req.url).pathname.includes('/api/')) return;
   const isNavigation = req.mode === 'navigate';
   event.respondWith(
     fetch(req, { cache: 'no-store' })

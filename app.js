@@ -10,8 +10,12 @@ const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), remove
 const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
 const homeBgVideo = $('homeBgVideo');
+const homeMeshCanvas = $('homeMeshCanvas');
+const AI_ENDPOINT = (window.MESHDOCTOR_AI_ENDPOINT || '/api/ai-correct').trim();
 let homeBgStream = null;
 let homeBgTried = false;
+let homeMeshCtx = null, homeMeshNodes = [], homeMeshRaf = 0, homeMeshLast = 0;
+let aiServiceState = 'unknown';
 
 let points = [];
 let draggedIndex = -1;
@@ -27,7 +31,7 @@ let aiRestoreChoice = null;
 let adjustTimer = null;
 const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
 let history = [];
-let currentFileBase = 'document';
+let currentFileBase = 'image';
 let selectedIndex = -1;
 let editZoom = 1, panX = 0, panY = 0;
 let gesture = null, pinchState = null, pinchedUntilClear = false;
@@ -88,6 +92,63 @@ function initAmbientShards(){
   }
 }
 
+function resizeHomeMesh(){
+  if(!homeMeshCanvas) return;
+  const rect=homeMeshCanvas.getBoundingClientRect();
+  if(rect.width<2||rect.height<2) return;
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const w=Math.round(rect.width*dpr),h=Math.round(rect.height*dpr);
+  if(homeMeshCanvas.width===w&&homeMeshCanvas.height===h&&homeMeshNodes.length) return;
+  homeMeshCanvas.width=w;homeMeshCanvas.height=h;
+  homeMeshCtx=homeMeshCanvas.getContext('2d');
+  homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
+  const count=clamp(Math.round(rect.width*rect.height/17500),18,34);
+  homeMeshNodes=Array.from({length:count},(_,i)=>({
+    x:Math.random()*rect.width,y:Math.random()*rect.height,
+    vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*8,
+    r:1.1+Math.random()*1.8,phase:Math.random()*Math.PI*2,
+    hot:i%7===0
+  }));
+}
+
+function drawHomeMesh(ts=0){
+  if(!homeMeshCanvas) return;
+  homeMeshRaf=requestAnimationFrame(drawHomeMesh);
+  if(document.hidden||!views.home.classList.contains('active')){homeMeshLast=ts;return;}
+  resizeHomeMesh();
+  const ctx=homeMeshCtx;if(!ctx)return;
+  const rect=homeMeshCanvas.getBoundingClientRect(),w=rect.width,h=rect.height;
+  const dt=Math.min(.033,Math.max(.001,(ts-homeMeshLast)/1000||.016));homeMeshLast=ts;
+  ctx.clearRect(0,0,w,h);
+  for(const n of homeMeshNodes){
+    n.x+=n.vx*dt;n.y+=n.vy*dt;
+    if(n.x<-12){n.x=w+12}else if(n.x>w+12){n.x=-12}
+    if(n.y<-12){n.y=h+12}else if(n.y>h+12){n.y=-12}
+  }
+  const maxDist=Math.min(142,Math.max(104,w*.22));
+  ctx.lineWidth=.75;
+  for(let i=0;i<homeMeshNodes.length;i++)for(let j=i+1;j<homeMeshNodes.length;j++){
+    const a=homeMeshNodes[i],b=homeMeshNodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
+    if(d>maxDist)continue;
+    const alpha=(1-d/maxDist)*.28;
+    ctx.strokeStyle=`rgba(53,207,255,${alpha})`;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  for(const n of homeMeshNodes){
+    const pulse=.72+.28*Math.sin(ts*.0013+n.phase);
+    ctx.shadowBlur=n.hot?12:7;ctx.shadowColor=n.hot?'rgba(255,79,227,.9)':'rgba(53,207,255,.8)';
+    ctx.fillStyle=n.hot?`rgba(255,79,227,${.60+.25*pulse})`:`rgba(105,135,255,${.50+.30*pulse})`;
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r*pulse,0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+
+function initHomeMesh(){
+  if(!homeMeshCanvas||homeMeshRaf)return;
+  resizeHomeMesh();homeMeshRaf=requestAnimationFrame(drawHomeMesh);
+  window.addEventListener('resize',resizeHomeMesh,{passive:true});
+}
+
 function showView(name){
   Object.values(views).forEach(v=>v.classList.remove('active'));
   views[name].classList.add('active');
@@ -103,7 +164,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 async function loadFile(file){
   if(!file) return;
-  currentFileBase = (file.name || 'document').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'document';
+  currentFileBase = (file.name || 'image').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'image';
   busy(true,'Loading photo…');
   try{
     const bmp = await createImageBitmap(file);
@@ -675,7 +736,9 @@ function detectRestoreIntent(img){
     }
   }
   const paperRatio=n?brightNeutral/n:0, meanSat=n?satSum/n:0, edge=edgeN?edgeSum/edgeN:0;
-  return (paperRatio>.28 && meanSat<.24) || (paperRatio>.18 && edge>13 && meanSat<.20) ? 'document' : 'photo';
+  // v1.4 is intentionally conservative: photographed paperwork is still a Photo.
+  // Only very neutral, page-filling, high-structure content is auto-routed to Document.
+  return (paperRatio>.68 && meanSat<.13 && edge>8.5) ? 'document' : 'photo';
 }
 
 function photoRestoreImage(img){
@@ -699,7 +762,7 @@ function photoRestoreImage(img){
     grid.set(next);
   }
   // Preserve the overall scene mood while strongly compressing broad glare/shadow variation.
-  const target=clamp(p50,92,168);
+  const target=clamp(p50+22,112,178);
   const tmp=new Uint8ClampedArray(src.length);
   let p=0;
   for(let y=0;y<H;y++){
@@ -719,10 +782,11 @@ function photoRestoreImage(img){
         const ratio=desired/Math.max(1,lum);r*=ratio;g*=ratio;b*=ratio;
       }
       // Lift genuine shadows more gently and keep colour intact.
-      const shadow=clamp((82-(.299*r+.587*g+.114*b))/70,0,1);
-      r+=shadow*12;g+=shadow*12;b+=shadow*12;
+      const shadow=clamp((104-(.299*r+.587*g+.114*b))/88,0,1);
+      r+=shadow*18;g+=shadow*18;b+=shadow*18;
       const avg=(r+g+b)/3;
-      r=avg+(r-avg)*1.035;g=avg+(g-avg)*1.035;b=avg+(b-avg)*1.035;
+      const vibrance=1.07 + clamp((.22-sat)/.22,0,1)*.08;
+      r=avg+(r-avg)*vibrance;g=avg+(g-avg)*vibrance;b=avg+(b-avg)*vibrance;
       tmp[p]=clamp(r,0,250);tmp[p+1]=clamp(g,0,250);tmp[p+2]=clamp(b,0,250);tmp[p+3]=255;
     }
   }
@@ -753,7 +817,7 @@ function resetAdjustments(render=false){
   if(render&&currentMode==='adjust'&&correctedOriginal){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
 }
 async function runCorrection(){
-  if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
+  if(points.length<4)return;busy(true,'Correcting image…');await new Promise(r=>setTimeout(r,40));
   try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
@@ -785,16 +849,83 @@ async function openAiAssist(){
   correctedImage ||= cleanupImage(correctedOriginal);
   displayImage(aiAssistImage||correctedImage);
   setModeButtons();
+  checkAiService();
 }
+function setAiEngineStatus(state,text){
+  const el=$('aiEngineStatus');if(!el)return;
+  el.classList.remove('ready','fallback');
+  if(state)el.classList.add(state);
+  const span=el.querySelector('span');if(span)span.textContent=text;
+}
+
+async function checkAiService(force=false){
+  if(aiServiceState!=='unknown'&&!force)return aiServiceState;
+  try{
+    const res=await fetch(AI_ENDPOINT,{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
+    if(!res.ok)throw new Error(`AI endpoint ${res.status}`);
+    const data=await res.json();
+    if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} ready`);}
+    else{aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI key not configured');}
+  }catch(err){
+    aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · GPT endpoint unavailable');
+  }
+  return aiServiceState;
+}
+
+function imageDataToUploadDataUrl(img,mode='photo',maxEdge=1536){
+  const src=document.createElement('canvas');src.width=img.width;src.height=img.height;src.getContext('2d').putImageData(img,0,0);
+  const scale=Math.min(1,maxEdge/Math.max(img.width,img.height));
+  const out=document.createElement('canvas');out.width=Math.max(1,Math.round(img.width*scale));out.height=Math.max(1,Math.round(img.height*scale));
+  const ctx=out.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(src,0,0,out.width,out.height);
+  const type=mode==='document'?'image/webp':'image/jpeg';
+  let data=out.toDataURL(type,mode==='document'?.96:.92);
+  if(data.length>3_800_000)data=out.toDataURL(type,mode==='document'?.88:.82);
+  return data;
+}
+
+async function dataUrlToImageData(dataUrl){
+  const blob=await fetch(dataUrl).then(r=>r.blob());
+  const bmp=await createImageBitmap(blob);
+  const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;
+  const cx=c.getContext('2d',{willReadFrequently:true});cx.drawImage(bmp,0,0);bmp.close?.();
+  return cx.getImageData(0,0,c.width,c.height);
+}
+
+async function gptRestoreImage(img,mode){
+  const payload={image:imageDataToUploadDataUrl(img,mode),mode,width:img.width,height:img.height};
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),120000);
+  try{
+    const res=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
+    let data={};try{data=await res.json();}catch{}
+    if(!res.ok||!data?.image)throw new Error(data?.error||`GPT restore failed (${res.status})`);
+    aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} restore complete`);
+    return await dataUrlToImageData(data.image);
+  }finally{clearTimeout(timer);}
+}
+
 async function runAiRestoreChoice(choice){
   aiRestoreChoice=choice;
   document.querySelectorAll('.ai-choice').forEach(b=>b.classList.toggle('active',b.dataset.aiChoice===choice));
   const resolved=choice==='automatic'?detectRestoreIntent(correctedOriginal):choice;
   $('aiChoiceStatus').textContent=choice==='automatic'?`Automatic selected ${resolved === 'document' ? 'Document' : 'Photo'}.`:`${choice === 'document' ? 'Document' : 'Photo'} restore selected.`;
-  busy(true, resolved==='document'?'Restoring document…':'Restoring photo…');
-  await new Promise(r=>setTimeout(r,30));
+  busy(true, resolved==='document'?'GPT cleaning document…':'GPT restoring photo…');
+  await new Promise(r=>setTimeout(r,20));
   try{
-    aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
+    const state=await checkAiService();
+    if(state==='ready'){
+      try{
+        aiAssistImage=await gptRestoreImage(correctedOriginal,resolved);
+        $('aiChoiceStatus').textContent=`GPT ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
+      }catch(err){
+        console.warn('GPT restore unavailable, using local fallback',err);
+        aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · GPT request failed');
+        aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
+        $('aiChoiceStatus').textContent=`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
+      }
+    }else{
+      aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
+      $('aiChoiceStatus').textContent=`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
+    }
     displayImage(aiAssistImage);
     currentMode='assist';
     setModeButtons();
@@ -842,11 +973,11 @@ function downloadCanvas(type='image/png'){
   resultCanvas.toBlob(blob=>{if(!blob)return;const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${currentFileBase}-corrected.${type==='image/png'?'png':'jpg'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Saved to your downloads.');},type,type==='image/jpeg'?.94:undefined);
 }
 async function shareCanvas(){
-  resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'Corrected document'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
+  resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
 }
 
 $('cameraInput').addEventListener('change',e=>loadFile(e.target.files[0]));$('galleryInput').addEventListener('change',e=>loadFile(e.target.files[0]));
-$('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Document edge re-detected.');});
+$('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Image boundary re-detected.');});
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());
@@ -869,8 +1000,8 @@ document.querySelectorAll('.ai-choice').forEach(btn=>btn.addEventListener('click
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
-window.addEventListener('load',()=>{ initAmbientShards();initMeshSliders();if(views.home.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMeshSliders();if(views.home.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.3', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.4', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
