@@ -1,14 +1,15 @@
-# DocMesh v1.0
+# DocMesh v1.1
 
-First 1.0 release.
+## Changes
+- AI Assisted now expands into three simple choices: **Automatic**, **Document**, and **Photo**.
+- Automatic analyzes the corrected image and chooses the local Document or Photo restoration path.
+- Document restore aims for a clean digital scan-like result.
+- Photo restore normalizes lighting and glare while keeping photographic detail natural.
+- Renamed **Undo Point** to **Undo**.
+- Adjustment controls are now drag-only: tapping the slider rail no longer changes the value.
+- Sliders use a purple-blue-to-blue gradient track with a hot-pink control.
+- Slider movement creates a short polygon trail that fades within 0.5 seconds.
+- Added subtle floating polygon shards to the home screen.
 
-## What changed from v0.9.3
-- Keeps the stronger AI Assisted cleanup for glare, reflections and uneven lighting.
-- Keeps the blurred live rear-camera background on the home screen.
-- Makes the home-screen camera treatment about **10% less dark** for a brighter, cleaner look.
-- Keeps the release-tag drop shadow and all existing correction/export features.
-- Updates cache/version strings for the v1.0 deployment.
-
-## Upload
-Replace the current GitHub Pages repo files with the full contents of this package, including `assets/` and `icons/`.
-After deployment, confirm the home screen says **RELEASE V1.0**.
+## Cloud AI note
+This release keeps the restore modes local so the GitHub Pages app works without exposing an API key. A future cloud restore can plug into these same Automatic / Document / Photo choices through a secure backend.

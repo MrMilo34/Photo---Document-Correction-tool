@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "DocMesh v1.0 \u2014 document correction with manual shape control, true grayscale, balanced Corrected cleanup, stronger AI Assisted restoration, and a blurred live-camera home backdrop.",
+  "description": "DocMesh image correction with mesh-based geometry, local adjustments, grayscale, and Automatic, Document and Photo AI-assisted restore modes.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",

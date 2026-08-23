@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>DocMesh</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.0" />
-  <link rel="icon" href="icons/icon-192.png?v=1.0" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.0" />
-  <link rel="stylesheet" href="styles.css?v=1.0" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.1" />
+  <link rel="icon" href="icons/icon-192.png?v=1.1" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.1" />
+  <link rel="stylesheet" href="styles.css?v=1.1" />
 </head>
 <body>
   <header class="topbar">
@@ -26,10 +26,11 @@
         <video id="homeBgVideo" playsinline muted autoplay></video>
         <div class="home-camera-vignette"></div>
       </div>
+      <div id="homeShardField" class="home-shard-field" aria-hidden="true"></div>
       <div class="hero-card splash-card">
         <img class="home-splash" src="assets/home-splash.png?v=0.9" alt="DocMesh splash screen" />
       </div>
-      <div class="version-tag">release v1.0</div>
+      <div class="version-tag">release v1.1</div>
 
       <div class="home-actions">
         <label class="primary big-btn">📷 Take Photo
@@ -54,7 +55,7 @@
       <div class="hint shape-ui">Pinch to zoom. Tap a point for Move / Remove. Tap a line to add a point.</div>
       <div class="toolbar scroll-x shape-ui">
         <button id="autoBtn">✨ Auto</button>
-        <button id="undoPointBtn">↶ Undo Point</button>
+        <button id="undoPointBtn">↶ Undo</button>
         <button id="resetBtn">◇ 4 Points</button>
         <button id="rotateBtn">↻ Rotate</button>
       </div>
@@ -75,59 +76,87 @@
         <div class="adjust-head">
           <div>
             <strong>Image Adjustments</strong>
-            <span>Fine tune the corrected pixels.</span>
+            <span>Drag the pink control to adjust.</span>
           </div>
           <button id="resetAdjustBtn" class="reset-adjust">Reset</button>
         </div>
 
-        <label class="slider-row">
+        <div class="slider-row">
           <span>Brightness <output id="brightnessValue">0</output></span>
-          <input id="brightnessSlider" type="range" min="-100" max="100" value="0" step="1" />
-        </label>
-        <label class="slider-row">
+          <div id="brightnessSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Brightness" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="brightness" data-value="0">
+            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
+            <div class="mesh-slider-trail" aria-hidden="true"></div>
+            <div class="mesh-slider-thumb" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="slider-row">
           <span>Contrast <output id="contrastValue">0</output></span>
-          <input id="contrastSlider" type="range" min="-100" max="100" value="0" step="1" />
-        </label>
-        <label class="slider-row">
+          <div id="contrastSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Contrast" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="contrast" data-value="0">
+            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
+            <div class="mesh-slider-trail" aria-hidden="true"></div>
+            <div class="mesh-slider-thumb" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="slider-row">
           <span>Saturation <output id="saturationValue">0</output></span>
-          <input id="saturationSlider" type="range" min="-100" max="100" value="0" step="1" />
-        </label>
-        <label class="slider-row">
+          <div id="saturationSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Saturation" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="saturation" data-value="0">
+            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
+            <div class="mesh-slider-trail" aria-hidden="true"></div>
+            <div class="mesh-slider-thumb" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="slider-row">
           <span>Black level <output id="blackValue">0</output></span>
-          <input id="blackSlider" type="range" min="-100" max="100" value="0" step="1" />
-        </label>
-        <label class="slider-row">
+          <div id="blackSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Black level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="black" data-value="0">
+            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
+            <div class="mesh-slider-trail" aria-hidden="true"></div>
+            <div class="mesh-slider-thumb" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="slider-row">
           <span>White level <output id="whiteValue">0</output></span>
-          <input id="whiteSlider" type="range" min="-100" max="100" value="0" step="1" />
-        </label>
+          <div id="whiteSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="White level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="white" data-value="0">
+            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
+            <div class="mesh-slider-trail" aria-hidden="true"></div>
+            <div class="mesh-slider-thumb" aria-hidden="true"></div>
+          </div>
+        </div>
       </section>
 
       <section id="aiAssistPanel" class="assist-panel hidden">
-        <div class="assist-badge">✦</div>
-        <div><strong>AI Assisted restore</strong><span>Runs the strongest restoration pass. It aims for a cleaner digital screen-like document by pushing glare removal, shadow cleanup and paper normalization much harder while still trying to keep the visible information the same.</span></div>
+        <div class="assist-head">
+          <div class="assist-badge">✦</div>
+          <div><strong>AI Assisted</strong><span>Choose how the image should be restored.</span></div>
+        </div>
+        <div class="ai-choice-row">
+          <button class="ai-choice" data-ai-choice="automatic">Automatic</button>
+          <button class="ai-choice" data-ai-choice="document">Document</button>
+          <button class="ai-choice" data-ai-choice="photo">Photo</button>
+        </div>
+        <div id="aiChoiceStatus" class="ai-choice-status">Select a restore mode.</div>
       </section>
 
-      <div class="mode-tip">Tip: use <strong>AI Assisted</strong> when you want the strongest cleanup for glare, reflections and uneven lighting while staying in full colour.</div>
+      <div class="mode-tip">AI Assisted can restore a document toward a clean digital scan, or clean a photograph while keeping natural image detail.</div>
 
       <div class="result-actions">
         <button id="shareBtn">↗ Share</button>
         <button id="savePngBtn" class="primary">Save PNG</button>
       </div>
-      <p class="safe-note">Corrected is the safer balanced cleanup. AI Assisted is the strongest full-colour cleanup mode and is best for difficult images with shadows, glare, fingers or uneven lighting.</p>
+      <p class="safe-note">Corrected is the fast local cleanup. AI Assisted adds Automatic, Document and Photo restore choices for harder images.</p>
     </section>
   </main>
 
   <dialog id="aboutDialog">
-    <h2>DocMesh v1.0</h2>
+    <h2>DocMesh v1.1</h2>
     <p>The perimeter points define the real page boundary and the app dewarps the photographed pixels into a flat document.</p>
-    <p><strong>AI Assist</strong> now has two cleanup levels: Corrected for balanced cleanup and AI Assisted for a stronger restoration pass that aims for a cleaner digital document result.</p>
-    <p><strong>v1.0:</strong> keeps the v0.9.3 cleanup and live camera background, with a slightly brighter home-screen camera treatment for a cleaner first-release look.</p>
+    <p><strong>AI Assisted</strong> now expands into Automatic, Document and Photo restore choices. Automatic decides which local restoration approach best fits the image.</p>
+    <p><strong>v1.1:</strong> adds AI restore choices, drag-only adjustment sliders, neon mesh slider trails, and subtle animated polygon shards.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=1.0"></script>
+  <script src="app.js?v=1.1"></script>
 </body>
 </html>

@@ -23,6 +23,7 @@ let aiAssistImage = null;
 let adjustedImage = null;
 let grayscaleImageCache = null;
 let currentMode = 'corrected';
+let aiRestoreChoice = null;
 let adjustTimer = null;
 const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
 let history = [];
@@ -35,6 +36,7 @@ let precisionMove = null;
 const SELECT_RADIUS_CSS = 62;
 const EDGE_TAP_RADIUS_CSS = 46;
 const MAX_ZOOM = 5;
+let lastSliderShardAt = 0;
 
 
 async function startHomeCameraBg(){
@@ -58,6 +60,26 @@ function stopHomeCameraBg(){
   homeBgStream = null;
   if(homeBgVideo) homeBgVideo.srcObject = null;
   homeBgTried = false;
+}
+
+
+function initAmbientShards(){
+  const field=$('homeShardField');
+  if(!field || field.childElementCount) return;
+  const count=12;
+  for(let i=0;i<count;i++){
+    const s=document.createElement('span');
+    s.className='ambient-shard';
+    const size=5+Math.random()*8;
+    s.style.width=s.style.height=`${size}px`;
+    s.style.left=`${8+Math.random()*84}%`;
+    s.style.top=`${18+Math.random()*72}%`;
+    s.style.setProperty('--dur',`${3.2+Math.random()*3.8}s`);
+    s.style.setProperty('--delay',`${-Math.random()*5}s`);
+    s.style.setProperty('--drift',`${-26+Math.random()*52}px`);
+    s.style.setProperty('--rot',`${Math.random()*180}deg`);
+    field.appendChild(s);
+  }
 }
 
 function showView(name){
@@ -624,17 +646,69 @@ function grayscaleImage(img){
   return out;
 }
 
+function detectRestoreIntent(img){
+  const W=img.width,H=img.height,s=img.data,step=Math.max(3,Math.round(Math.max(W,H)/420));
+  let n=0,brightNeutral=0,satSum=0,edgeN=0,edgeSum=0;
+  for(let y=step;y<H-step;y+=step){
+    for(let x=step;x<W-step;x+=step){
+      const p=(y*W+x)*4,r=s[p],g=s[p+1],b=s[p+2],maxv=Math.max(r,g,b),minv=Math.min(r,g,b);
+      const lum=.299*r+.587*g+.114*b,sat=(maxv-minv)/Math.max(1,maxv);
+      if(lum>178&&sat<.16) brightNeutral++;
+      satSum+=sat;n++;
+      const q=(y*W+x+step)*4;
+      if(q<s.length){const l2=.299*s[q]+.587*s[q+1]+.114*s[q+2];edgeSum+=Math.abs(lum-l2);edgeN++;}
+    }
+  }
+  const paperRatio=n?brightNeutral/n:0, meanSat=n?satSum/n:0, edge=edgeN?edgeSum/edgeN:0;
+  return (paperRatio>.28 && meanSat<.24) || (paperRatio>.18 && edge>13 && meanSat<.20) ? 'document' : 'photo';
+}
+
+function photoRestoreImage(img){
+  const W=img.width,H=img.height,src=img.data,out=new ImageData(W,H),d=out.data;
+  const step=Math.max(20,Math.round(Math.max(W,H)/72)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),count=gw*gh;
+  const grid=new Float32Array(count),weights=new Float32Array(count);
+  let globalLum=0,globalN=0;
+  for(let y=0;y<H;y+=3)for(let x=0;x<W;x+=3){
+    const p=(y*W+x)*4,r=src[p],g=src[p+1],b=src[p+2],lum=.299*r+.587*g+.114*b;
+    const c=Math.floor(y/step)*gw+Math.floor(x/step),w=.35+clamp(lum/255,.1,1);
+    grid[c]+=lum*w;weights[c]+=w;globalLum+=lum;globalN++;
+  }
+  for(let i=0;i<count;i++)grid[i]=weights[i]?grid[i]/weights[i]:(globalLum/Math.max(1,globalN));
+  for(let pass=0;pass<4;pass++){
+    const next=new Float32Array(count);
+    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){let sum=0,w=0;for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){const idx=yy*gw+xx,wt=(xx===x&&yy===y)?4:1;sum+=grid[idx]*wt;w+=wt;}next[y*gw+x]=sum/w;}
+    grid.set(next);
+  }
+  const target=clamp((globalLum/Math.max(1,globalN))*1.04,108,178);
+  let p=0;
+  for(let y=0;y<H;y++){
+    const gy=y/step,y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
+    for(let x=0;x<W;x++,p+=4){
+      const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;
+      const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,bg=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,local=a*(1-fy)+bg*fy;
+      const gain=clamp(target/Math.max(55,local),.78,1.30);
+      let r=src[p]*gain,g=src[p+1]*gain,b=src[p+2]*gain;
+      const avg=(r+g+b)/3;
+      r=avg+(r-avg)*1.025;g=avg+(g-avg)*1.025;b=avg+(b-avg)*1.025;
+      for(const c of [0,1,2]){let v=c===0?r:(c===1?g:b); if(v>218)v=218+(v-218)*.48; v+=Math.pow(1-clamp(v/255,0,1),2)*10; v=(v-128)*1.025+128; if(c===0)r=v;else if(c===1)g=v;else b=v;}
+      d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255;
+    }
+  }
+  const copy=new Uint8ClampedArray(d);
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const p=(y*W+x)*4;for(let c=0;c<3;c++){const blur=(copy[((y-1)*W+x)*4+c]+copy[((y+1)*W+x)*4+c]+copy[(y*W+x-1)*4+c]+copy[(y*W+x+1)*4+c])*.25;d[p+c]=clamp(copy[p+c]+(copy[p+c]-blur)*.12,0,255);}}
+  return out;
+}
+
 function displayImage(img){resultCanvas.width=img.width;resultCanvas.height=img.height;rctx.putImageData(img,0,0);}
 function resetAdjustments(render=false){
   Object.keys(adjustments).forEach(k=>adjustments[k]=0);
-  const ids={brightness:'brightnessSlider',contrast:'contrastSlider',saturation:'saturationSlider',black:'blackSlider',white:'whiteSlider'};
-  for(const [k,id] of Object.entries(ids)){const el=$(id);if(el)el.value=0;const out=$(k+'Value');if(out)out.value='0';}
+  document.querySelectorAll('.mesh-slider').forEach(el=>setSliderValue(el,0,false));
   adjustedImage=null;
   if(render&&currentMode==='adjust'&&correctedOriginal){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
 }
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
@@ -642,26 +716,12 @@ async function setMode(mode){
   currentMode=mode;
   $('adjustPanel').classList.toggle('hidden',mode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',mode!=='assist');
-  if(mode==='assist'&&!aiAssistImage){busy(true,'Running AI Assisted restore…');await new Promise(r=>setTimeout(r,35));}
-  else if(mode==='bw'&&!grayscaleImageCache){busy(true,'Making grayscale image…');await new Promise(r=>setTimeout(r,30));}
+  if(mode==='bw'&&!grayscaleImageCache){busy(true,'Making grayscale image…');await new Promise(r=>setTimeout(r,30));}
   try{
-    if(mode==='corrected') {
-      correctedImage ||= cleanupImage(correctedOriginal);
-      displayImage(correctedImage);
-    }
-    else if(mode==='adjust') {
-      adjustedImage=applyAdjustments(correctedOriginal);
-      displayImage(adjustedImage);
-    }
-    else if(mode==='assist') {
-      aiAssistImage ||= aggressiveCleanupImage(correctedOriginal);
-      displayImage(aiAssistImage);
-    }
-    else {
-      correctedImage ||= cleanupImage(correctedOriginal);
-      grayscaleImageCache ||= grayscaleImage(correctedImage);
-      displayImage(grayscaleImageCache);
-    }
+    if(mode==='corrected'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(correctedImage);}
+    else if(mode==='adjust'){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+    else if(mode==='bw'){correctedImage ||= cleanupImage(correctedOriginal);grayscaleImageCache ||= grayscaleImage(correctedImage);displayImage(grayscaleImageCache);}
+    else if(mode==='assist'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(aiAssistImage||correctedImage);}
     setModeButtons();
   }finally{busy(false);}
 }
@@ -672,19 +732,59 @@ function setModeButtons(){
   $('adjustPanel').classList.toggle('hidden',currentMode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',currentMode!=='assist');
 }
+async function openAiAssist(){
+  currentMode='assist';
+  $('adjustPanel').classList.add('hidden');
+  $('aiAssistPanel').classList.remove('hidden');
+  correctedImage ||= cleanupImage(correctedOriginal);
+  displayImage(aiAssistImage||correctedImage);
+  setModeButtons();
+}
+async function runAiRestoreChoice(choice){
+  aiRestoreChoice=choice;
+  document.querySelectorAll('.ai-choice').forEach(b=>b.classList.toggle('active',b.dataset.aiChoice===choice));
+  const resolved=choice==='automatic'?detectRestoreIntent(correctedOriginal):choice;
+  $('aiChoiceStatus').textContent=choice==='automatic'?`Automatic selected ${resolved === 'document' ? 'Document' : 'Photo'}.`:`${choice === 'document' ? 'Document' : 'Photo'} restore selected.`;
+  busy(true, resolved==='document'?'Restoring document…':'Restoring photo…');
+  await new Promise(r=>setTimeout(r,30));
+  try{
+    aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
+    displayImage(aiAssistImage);
+    currentMode='assist';
+    setModeButtons();
+  }finally{busy(false);}
+}
 
+function setSliderValue(el,value,render=true){
+  const v=clamp(Math.round(value),-100,100),pct=(v+100)/200*100;
+  el.dataset.value=String(v);
+  el.setAttribute('aria-valuenow',String(v));
+  el.querySelector('.mesh-slider-thumb').style.left=`${pct}%`;
+  el.querySelector('.mesh-slider-fill').style.width=`${pct}%`;
+  const key=el.dataset.adjust;adjustments[key]=v;
+  const output=$(key+'Value');if(output)output.value=(v>0?'+':'')+v;
+  if(render) scheduleAdjustmentRender();
+}
+function emitSliderShard(el,pct){
+  const now=performance.now();if(now-lastSliderShardAt<24)return;lastSliderShardAt=now;
+  const trail=el.querySelector('.mesh-slider-trail');if(!trail)return;
+  for(let i=0;i<2;i++){const s=document.createElement('span');s.className='slider-shard';s.style.left=`${pct}%`;s.style.setProperty('--dx',`${-14+Math.random()*28}px`);s.style.setProperty('--dy',`${-18+Math.random()*30}px`);s.style.setProperty('--r',`${Math.random()*180}deg`);trail.appendChild(s);setTimeout(()=>s.remove(),520);}
+}
+function initMeshSliders(){
+  document.querySelectorAll('.mesh-slider').forEach(el=>{
+    setSliderValue(el,Number(el.dataset.value)||0,false);
+    let dragging=false;
+    const updateFromPointer=(ev)=>{const rect=el.getBoundingClientRect(),pct=clamp((ev.clientX-rect.left)/rect.width,0,1);setSliderValue(el,-100+pct*200,true);emitSliderShard(el,pct*100);};
+    el.addEventListener('pointerdown',ev=>{if(!ev.target.classList.contains('mesh-slider-thumb'))return;dragging=true;el.classList.add('dragging');el.setPointerCapture(ev.pointerId);ev.preventDefault();});
+    el.addEventListener('pointermove',ev=>{if(!dragging)return;updateFromPointer(ev);ev.preventDefault();});
+    const stop=ev=>{if(!dragging)return;dragging=false;el.classList.remove('dragging');try{el.releasePointerCapture(ev.pointerId);}catch{}};
+    el.addEventListener('pointerup',stop);el.addEventListener('pointercancel',stop);
+    el.addEventListener('keydown',ev=>{let delta=0;if(ev.key==='ArrowLeft'||ev.key==='ArrowDown')delta=-1;if(ev.key==='ArrowRight'||ev.key==='ArrowUp')delta=1;if(ev.key==='PageDown')delta=-10;if(ev.key==='PageUp')delta=10;if(!delta)return;ev.preventDefault();setSliderValue(el,(Number(el.dataset.value)||0)+delta,true);});
+  });
+}
 function scheduleAdjustmentRender(){
-  const map={brightness:'brightnessSlider',contrast:'contrastSlider',saturation:'saturationSlider',black:'blackSlider',white:'whiteSlider'};
-  for(const [k,id] of Object.entries(map)){
-    adjustments[k]=Number($(id).value)||0;
-    $(k+'Value').value=(adjustments[k]>0?'+':'')+adjustments[k];
-  }
   clearTimeout(adjustTimer);
-  adjustTimer=setTimeout(()=>{
-    if(currentMode!=='adjust'||!correctedOriginal)return;
-    adjustedImage=applyAdjustments(correctedOriginal);
-    displayImage(adjustedImage);
-  },65);
+  adjustTimer=setTimeout(()=>{if(currentMode!=='adjust'||!correctedOriginal)return;adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);},55);
 }
 
 function rotateSource(){
@@ -708,13 +808,13 @@ $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor(
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
 $('correctedModeBtn').addEventListener('click',()=>setMode('corrected'));
-$('aiAssistModeBtn').addEventListener('click',()=>setMode('assist'));
-['brightnessSlider','contrastSlider','saturationSlider','blackSlider','whiteSlider'].forEach(id=>$(id).addEventListener('input',scheduleAdjustmentRender));
+$('aiAssistModeBtn').addEventListener('click',openAiAssist);
+document.querySelectorAll('.ai-choice').forEach(btn=>btn.addEventListener('click',()=>runAiRestoreChoice(btn.dataset.aiChoice)));
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
-window.addEventListener('load',()=>{ if(views.home.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',()=>{ initAmbientShards();initMeshSliders();if(views.home.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.0', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.1', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
