@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "DocMesh image correction with mesh-based geometry, local adjustments, grayscale, and Automatic, Document and Photo AI-assisted restore modes.",
+  "description": "DocMesh image correction with editable mesh geometry, 1x free panning, manual adjustments, grayscale, and Automatic / Document / Photo restoration modes.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",

@@ -36,6 +36,12 @@ let precisionMove = null;
 const SELECT_RADIUS_CSS = 62;
 const EDGE_TAP_RADIUS_CSS = 46;
 const MAX_ZOOM = 5;
+let shapeUiHideTimer = null;
+function hideShapeUiTransient(delay=650){
+  clearTimeout(shapeUiHideTimer);
+  views.shape.classList.add('interaction-hide');
+  shapeUiHideTimer=setTimeout(()=>views.shape.classList.remove('interaction-hide'),delay);
+}
 let lastSliderShardAt = 0;
 
 
@@ -194,10 +200,11 @@ function autoDetectDocument(){
 function polygonArea(ps){let a=0;for(let i=0;i<ps.length;i++){const p=ps[i],q=ps[(i+1)%ps.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
 
 function applyViewport(showChip=false){
-  if(editZoom<=1.01){editZoom=1;panX=0;panY=0;}
+  if(editZoom<=1.01)editZoom=1;
+  clampPan();
   canvasPan.style.transform=`translate3d(${panX}px,${panY}px,0)`;
   canvasZoom.style.transform=`scale(${editZoom})`;
-  views.shape.classList.toggle('focus-edit',editZoom>1.18 || !!precisionMove || (gesture?.type==='point' && gesture.moved));
+  views.shape.classList.toggle('focus-edit',editZoom>1.18 || !!precisionMove);
   if(showChip || editZoom>1.02){
     zoomChip.textContent=`${editZoom.toFixed(1)}×`;
     zoomChip.classList.remove('hidden');
@@ -208,12 +215,14 @@ function applyViewport(showChip=false){
 }
 function resetViewport(){
   editZoom=1;panX=0;panY=0;pinchState=null;gesture=null;pinchedUntilClear=false;activePointers.clear();
+  views.shape.classList.remove('interaction-hide');clearTimeout(shapeUiHideTimer);
   applyViewport(false);
 }
 function clampPan(){
-  if(editZoom<=1.01){panX=0;panY=0;return;}
   const r=stageWrap.getBoundingClientRect();
-  const mx=r.width*Math.min(2.4,editZoom*.72), my=r.height*Math.min(2.4,editZoom*.72);
+  // Even at 1x, allow roughly 25% of the viewport in every direction so edge points can be pulled away from phone chrome.
+  const range=.25 + Math.max(0,editZoom-1)*.72;
+  const mx=r.width*Math.min(2.4,range), my=r.height*Math.min(2.4,range);
   panX=clamp(panX,-mx,mx);panY=clamp(panY,-my,my);
 }
 function hidePointActions(){pointActions.classList.add('hidden');}
@@ -289,6 +298,7 @@ function startPinch(){
   pinchedUntilClear=true;gesture=null;hidePointActions();loupe.classList.add('hidden');
 }
 function handlePinch(){
+  hideShapeUiTransient(900);
   if(!pinchState||activePointers.size<2)return;const ps=[...activePointers.values()],a=ps[0],b=ps[1];
   const dist=Math.max(1,screenDistance(a,b)), mid=midpoint(a,b), newZoom=clamp(pinchState.zoom*(dist/pinchState.distance),1,MAX_ZOOM), factor=newZoom/pinchState.zoom;
   const sr=stageWrap.getBoundingClientRect(),cx=sr.left+sr.width/2,cy=sr.top+sr.height/2;
@@ -298,6 +308,7 @@ function handlePinch(){
 }
 
 editCanvas.addEventListener('pointerdown',ev=>{
+  hideShapeUiTransient(900);
   ev.preventDefault();editCanvas.setPointerCapture?.(ev.pointerId);activePointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
   if(activePointers.size>=2){startPinch();return;}
   const p=eventToCanvas(ev),idx=nearestPoint(p);
@@ -310,6 +321,7 @@ editCanvas.addEventListener('pointerdown',ev=>{
   }
 });
 editCanvas.addEventListener('pointermove',ev=>{
+  if(activePointers.has(ev.pointerId))hideShapeUiTransient(900);
   if(activePointers.has(ev.pointerId))activePointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
   if(pinchedUntilClear&&activePointers.size>=2){handlePinch();return;}
   if(!gesture||gesture.pointerId!==ev.pointerId||pinchedUntilClear)return;
@@ -324,10 +336,11 @@ editCanvas.addEventListener('pointermove',ev=>{
     selectedIndex=gesture.index;renderEditor();showLoupe(target,ev);applyViewport(false);
   }else if(gesture.type==='blank'){
     if(dist>7)gesture.moved=true;
-    if(gesture.moved&&editZoom>1.01){panX=gesture.panStart.x+(ev.clientX-gesture.startClient.x);panY=gesture.panStart.y+(ev.clientY-gesture.startClient.y);clampPan();applyViewport(false);}
+    if(gesture.moved){panX=gesture.panStart.x+(ev.clientX-gesture.startClient.x);panY=gesture.panStart.y+(ev.clientY-gesture.startClient.y);clampPan();applyViewport(false);}
   }
 });
 editCanvas.addEventListener('pointerup',ev=>{
+  hideShapeUiTransient(520);
   ev.preventDefault();activePointers.delete(ev.pointerId);loupe.classList.add('hidden');
   if(pinchedUntilClear){if(activePointers.size===0){pinchedUntilClear=false;pinchState=null;gesture=null;applyViewport(true);}return;}
   if(!gesture||gesture.pointerId!==ev.pointerId)return;
@@ -336,15 +349,17 @@ editCanvas.addEventListener('pointerup',ev=>{
     selectedIndex=g.index;renderEditor();pointActions.classList.remove('hidden');updatePointActions();applyViewport(false);
   }else if(!g.moved){addPointAt(g.downCanvas);}else applyViewport(false);
 });
-editCanvas.addEventListener('pointercancel',ev=>{activePointers.delete(ev.pointerId);loupe.classList.add('hidden');if(activePointers.size===0){gesture=null;pinchState=null;pinchedUntilClear=false;}applyViewport(false);});
+editCanvas.addEventListener('pointercancel',ev=>{hideShapeUiTransient(420);activePointers.delete(ev.pointerId);loupe.classList.add('hidden');if(activePointers.size===0){gesture=null;pinchState=null;pinchedUntilClear=false;}applyViewport(false);});
 
 movePointBtn.addEventListener('pointerdown',ev=>{
+  hideShapeUiTransient(900);
   ev.preventDefault();ev.stopPropagation();if(selectedIndex<0||!points[selectedIndex])return;
   movePointBtn.setPointerCapture?.(ev.pointerId);
   precisionMove={pointerId:ev.pointerId,index:selectedIndex,startX:ev.clientX,startY:ev.clientY,origin:{x:points[selectedIndex].x,y:points[selectedIndex].y},historySaved:false,moved:false};
   hidePointActions();views.shape.classList.add('focus-edit');showLoupe(points[selectedIndex],ev);
 });
 movePointBtn.addEventListener('pointermove',ev=>{
+  if(precisionMove)hideShapeUiTransient(900);
   if(!precisionMove||precisionMove.pointerId!==ev.pointerId)return;ev.preventDefault();
   const dx=ev.clientX-precisionMove.startX,dy=ev.clientY-precisionMove.startY;if(Math.hypot(dx,dy)<2&&!precisionMove.moved)return;
   if(!precisionMove.historySaved){history.push(points.map(q=>({...q})));precisionMove.historySaved=true;}precisionMove.moved=true;
@@ -664,38 +679,69 @@ function detectRestoreIntent(img){
 }
 
 function photoRestoreImage(img){
+  // Local photo restoration: compress broad lighting/reflection veils while preserving natural colour and detail.
   const W=img.width,H=img.height,src=img.data,out=new ImageData(W,H),d=out.data;
-  const step=Math.max(20,Math.round(Math.max(W,H)/72)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),count=gw*gh;
-  const grid=new Float32Array(count),weights=new Float32Array(count);
+  const step=Math.max(18,Math.round(Math.max(W,H)/82)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),count=gw*gh;
+  const grid=new Float32Array(count),weights=new Float32Array(count),hist=new Uint32Array(256);
   let globalLum=0,globalN=0;
   for(let y=0;y<H;y+=3)for(let x=0;x<W;x+=3){
     const p=(y*W+x)*4,r=src[p],g=src[p+1],b=src[p+2],lum=.299*r+.587*g+.114*b;
-    const c=Math.floor(y/step)*gw+Math.floor(x/step),w=.35+clamp(lum/255,.1,1);
-    grid[c]+=lum*w;weights[c]+=w;globalLum+=lum;globalN++;
+    const c=Math.floor(y/step)*gw+Math.floor(x/step),w=.45+clamp(lum/255,.12,1);
+    grid[c]+=lum*w;weights[c]+=w;globalLum+=lum;globalN++;hist[Math.round(clamp(lum,0,255))]++;
   }
-  for(let i=0;i<count;i++)grid[i]=weights[i]?grid[i]/weights[i]:(globalLum/Math.max(1,globalN));
-  for(let pass=0;pass<4;pass++){
+  const mean=globalLum/Math.max(1,globalN);
+  let total=globalN,acc=0,p50=mean,p88=Math.min(245,mean+60);
+  for(let i=0;i<256;i++){acc+=hist[i];if(acc>=total*.50&&p50===mean)p50=i;if(acc>=total*.88){p88=i;break;}}
+  for(let i=0;i<count;i++)grid[i]=weights[i]?grid[i]/weights[i]:mean;
+  for(let pass=0;pass<5;pass++){
     const next=new Float32Array(count);
-    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){let sum=0,w=0;for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){const idx=yy*gw+xx,wt=(xx===x&&yy===y)?4:1;sum+=grid[idx]*wt;w+=wt;}next[y*gw+x]=sum/w;}
+    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){let sum=0,w=0;for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){const idx=yy*gw+xx,wt=(xx===x&&yy===y)?5:((Math.abs(xx-x)+Math.abs(yy-y)===1)?2:1);sum+=grid[idx]*wt;w+=wt;}next[y*gw+x]=sum/w;}
     grid.set(next);
   }
-  const target=clamp((globalLum/Math.max(1,globalN))*1.04,108,178);
+  // Preserve the overall scene mood while strongly compressing broad glare/shadow variation.
+  const target=clamp(p50,92,168);
+  const tmp=new Uint8ClampedArray(src.length);
   let p=0;
   for(let y=0;y<H;y++){
     const gy=y/step,y0=Math.min(gh-1,Math.floor(gy)),y1=Math.min(gh-1,y0+1),fy=gy-y0;
     for(let x=0;x<W;x++,p+=4){
       const gx=x/step,x0=Math.min(gw-1,Math.floor(gx)),x1=Math.min(gw-1,x0+1),fx=gx-x0;
       const a=grid[y0*gw+x0]*(1-fx)+grid[y0*gw+x1]*fx,bg=grid[y1*gw+x0]*(1-fx)+grid[y1*gw+x1]*fx,local=a*(1-fy)+bg*fy;
-      const gain=clamp(target/Math.max(55,local),.78,1.30);
+      const broadTarget=target+(local-target)*.24;
+      const gain=clamp(broadTarget/Math.max(42,local),.62,1.48);
       let r=src[p]*gain,g=src[p+1]*gain,b=src[p+2]*gain;
+      const origLum=.299*src[p]+.587*src[p+1]+.114*src[p+2];
+      const maxv=Math.max(r,g,b),minv=Math.min(r,g,b),sat=(maxv-minv)/Math.max(1,maxv);
+      // Reflection veil tends to be unusually bright and low-saturation; pull it back instead of blowing it out.
+      const glare=clamp((origLum-p88+22)/48,0,1)*(1-clamp((sat-.18)/.35,0,1));
+      if(glare>0){
+        const lum=.299*r+.587*g+.114*b, desired=target+(lum-target)*.50;
+        const ratio=desired/Math.max(1,lum);r*=ratio;g*=ratio;b*=ratio;
+      }
+      // Lift genuine shadows more gently and keep colour intact.
+      const shadow=clamp((82-(.299*r+.587*g+.114*b))/70,0,1);
+      r+=shadow*12;g+=shadow*12;b+=shadow*12;
       const avg=(r+g+b)/3;
-      r=avg+(r-avg)*1.025;g=avg+(g-avg)*1.025;b=avg+(b-avg)*1.025;
-      for(const c of [0,1,2]){let v=c===0?r:(c===1?g:b); if(v>218)v=218+(v-218)*.48; v+=Math.pow(1-clamp(v/255,0,1),2)*10; v=(v-128)*1.025+128; if(c===0)r=v;else if(c===1)g=v;else b=v;}
-      d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255;
+      r=avg+(r-avg)*1.035;g=avg+(g-avg)*1.035;b=avg+(b-avg)*1.035;
+      tmp[p]=clamp(r,0,250);tmp[p+1]=clamp(g,0,250);tmp[p+2]=clamp(b,0,250);tmp[p+3]=255;
     }
   }
-  const copy=new Uint8ClampedArray(d);
-  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const p=(y*W+x)*4;for(let c=0;c<3;c++){const blur=(copy[((y-1)*W+x)*4+c]+copy[((y+1)*W+x)*4+c]+copy[(y*W+x-1)*4+c]+copy[(y*W+x+1)*4+c])*.25;d[p+c]=clamp(copy[p+c]+(copy[p+c]-blur)*.12,0,255);}}
+  // Restore local contrast lost to haze/reflection, but don't create a crunchy photocopy look.
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const p=(y*W+x)*4;
+    for(let c=0;c<3;c++){
+      let v=tmp[p+c];
+      if(x>0&&x<W-1&&y>0&&y<H-1){
+        const blur=(tmp[((y-1)*W+x)*4+c]+tmp[((y+1)*W+x)*4+c]+tmp[(y*W+x-1)*4+c]+tmp[(y*W+x+1)*4+c])*.25;
+        const edge=Math.abs(v-blur);
+        v+= (v-blur) * (.16 + Math.min(.10,edge/180));
+      }
+      // soft highlight rolloff keeps lamp reflections and glossy spots controlled
+      if(v>220)v=220+(v-220)*.58;
+      d[p+c]=clamp(v,0,250);
+    }
+    d[p+3]=255;
+  }
   return out;
 }
 
@@ -803,7 +849,17 @@ $('cameraInput').addEventListener('change',e=>loadFile(e.target.files[0]));$('ga
 $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Document edge re-detected.');});
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
-$('rotateBtn').addEventListener('click',()=>rotateSource());$('correctBtn').addEventListener('click',runCorrection);
+$('rotateBtn').addEventListener('click',()=>rotateSource());
+function burstCorrectButton(){
+  const btn=$('correctBtn'),r=btn.getBoundingClientRect();
+  for(let i=0;i<8;i++){
+    const s=document.createElement('span');s.className='correct-shard';
+    s.style.left=`${r.left+r.width*(.16+Math.random()*.68)}px`;s.style.top=`${r.top+r.height*(.28+Math.random()*.44)}px`;
+    s.style.setProperty('--dx',`${-32+Math.random()*64}px`);s.style.setProperty('--dy',`${-26+Math.random()*52}px`);s.style.setProperty('--rot',`${Math.random()*180}deg`);
+    document.body.appendChild(s);setTimeout(()=>s.remove(),580);
+  }
+}
+$('correctBtn').addEventListener('pointerdown',burstCorrectButton);$('correctBtn').addEventListener('click',runCorrection);
 $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
@@ -817,4 +873,4 @@ window.addEventListener('load',()=>{ initAmbientShards();initMeshSliders();if(vi
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.1', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.2', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

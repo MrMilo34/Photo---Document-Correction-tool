@@ -1,15 +1,12 @@
-# DocMesh v1.1
+# DocMesh v1.2
 
 ## Changes
-- AI Assisted now expands into three simple choices: **Automatic**, **Document**, and **Photo**.
-- Automatic analyzes the corrected image and chooses the local Document or Photo restoration path.
-- Document restore aims for a clean digital scan-like result.
-- Photo restore normalizes lighting and glare while keeping photographic detail natural.
-- Renamed **Undo Point** to **Undo**.
-- Adjustment controls are now drag-only: tapping the slider rail no longer changes the value.
-- Sliders use a purple-blue-to-blue gradient track with a hot-pink control.
-- Slider movement creates a short polygon trail that fades within 0.5 seconds.
-- Added subtle floating polygon shards to the home screen.
+- The editor can now pan roughly 25% in any direction even at 1x zoom, making edge and corner points easier to reach.
+- Touching or moving the image temporarily hides the editing controls and hint so the image stays unobstructed while you work.
+- `Correct Document` is now **Correct Image**.
+- Correct Image has a black neon mesh treatment with cyan text, animated mesh lines, nodes, and a short polygon burst on press.
+- Photo restore received another local reflection/haze pass with stronger broad-light normalization and highlight compression.
+- Keeps the v1.1 drag-only mesh sliders and Automatic / Document / Photo restore choices.
 
-## Cloud AI note
-This release keeps the restore modes local so the GitHub Pages app works without exposing an API key. A future cloud restore can plug into these same Automatic / Document / Photo choices through a secure backend.
+## Note
+The current restore modes still run locally in the browser. A true generative cloud restoration model would require a secure backend rather than placing an API key in the GitHub Pages app.

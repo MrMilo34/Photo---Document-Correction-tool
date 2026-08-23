@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>DocMesh</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.1" />
-  <link rel="icon" href="icons/icon-192.png?v=1.1" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.1" />
-  <link rel="stylesheet" href="styles.css?v=1.1" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.2" />
+  <link rel="icon" href="icons/icon-192.png?v=1.2" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.2" />
+  <link rel="stylesheet" href="styles.css?v=1.2" />
 </head>
 <body>
   <header class="topbar">
@@ -30,7 +30,7 @@
       <div class="hero-card splash-card">
         <img class="home-splash" src="assets/home-splash.png?v=0.9" alt="DocMesh splash screen" />
       </div>
-      <div class="version-tag">release v1.1</div>
+      <div class="version-tag">release v1.2</div>
 
       <div class="home-actions">
         <label class="primary big-btn">📷 Take Photo
@@ -59,7 +59,7 @@
         <button id="resetBtn">◇ 4 Points</button>
         <button id="rotateBtn">↻ Rotate</button>
       </div>
-      <button id="correctBtn" class="primary bottom-action shape-ui">CORRECT DOCUMENT</button>
+      <button id="correctBtn" class="bottom-action shape-ui mesh-correct"><span>CORRECT IMAGE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
     </section>
 
     <section id="resultView" class="view result-view">
@@ -147,16 +147,16 @@
   </main>
 
   <dialog id="aboutDialog">
-    <h2>DocMesh v1.1</h2>
+    <h2>DocMesh v1.2</h2>
     <p>The perimeter points define the real page boundary and the app dewarps the photographed pixels into a flat document.</p>
     <p><strong>AI Assisted</strong> now expands into Automatic, Document and Photo restore choices. Automatic decides which local restoration approach best fits the image.</p>
-    <p><strong>v1.1:</strong> adds AI restore choices, drag-only adjustment sliders, neon mesh slider trails, and subtle animated polygon shards.</p>
+    <p><strong>v1.2:</strong> adds free panning at 1x, interaction-aware editor controls, a mesh-styled Correct Image button, and stronger local reflection cleanup for Photo restore.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=1.1"></script>
+  <script src="app.js?v=1.2"></script>
 </body>
 </html>
