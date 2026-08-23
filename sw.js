@@ -1,13 +1,13 @@
-const CACHE = 'docmesh-v1.2.0';
+const CACHE = 'meshdoctor-v1.3.0';
 const CORE = [
   './',
   './index.html',
-  './styles.css?v=1.2',
-  './app.js?v=1.2',
-  './manifest.webmanifest?v=1.2',
-  './icons/icon-192.png?v=1.2',
-  './icons/icon-512.png?v=1.2',
-  './assets/home-splash.png?v=0.9'
+  './styles.css?v=1.3',
+  './app.js?v=1.3',
+  './manifest.webmanifest?v=1.3',
+  './icons/icon-192.png?v=1.3',
+  './icons/icon-512.png?v=1.3',
+  './assets/home-splash.png?v=1.3'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(()=>self.skipWaiting()));

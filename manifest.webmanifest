@@ -1,7 +1,7 @@
 {
-  "name": "DocMesh",
-  "short_name": "DocMesh",
-  "description": "DocMesh image correction with editable mesh geometry, 1x free panning, manual adjustments, grayscale, and Automatic / Document / Photo restoration modes.",
+  "name": "MeshDoctor",
+  "short_name": "MeshDoctor",
+  "description": "MeshDoctor restores and corrects photographed documents and photos with mesh-based geometry tools, local image adjustments, and Automatic, Document, and Photo restoration modes.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",
