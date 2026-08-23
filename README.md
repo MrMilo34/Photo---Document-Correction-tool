@@ -1,17 +1,20 @@
-# DocMesh v0.7
+# DocMesh v0.9
 
 ## What changed
-- Uses the approved new splash screen art.
-- Keeps the result order: **Adjust, Greyscale, Corrected, AI Assisted**.
-- Further tunes **AI Assisted** into the strongest experimental restoration mode.
-- AI Assisted is now better suited to harder handheld document images with shadows, glare, fingers, or uneven lighting.
-- Adds a small in-app tip explaining when to use AI Assisted.
-- Updates cache-busting to help GitHub Pages show the new build more reliably.
+- Carries forward the v0.8 page-proportion correction improvements.
+- Carries forward the stronger **AI Assisted** restore mode.
+- Carries forward the improved mobile layout for the **AI Assisted** button.
+- Replaces the old harsh photocopy-style filter with **true Grayscale**.
+- Grayscale now removes colour while preserving smooth tonal detail, shadows, gray text, and photograph detail instead of forcing pixels to pure black or white.
+- Keeps the approved DocMesh splash screen.
+- Bumps the cache version so GitHub Pages should pick up v0.9 cleanly.
 
-## Notes
-- **Corrected** remains the safer balanced cleanup mode.
-- **AI Assisted** is the least restrictive mode and may lightly rebuild the restored look of the image while aiming to keep visible text the same.
+## Result modes
+1. **Adjust** — manual image controls.
+2. **Grayscale** — smooth grayscale conversion with full tonal range.
+3. **Corrected** — balanced document cleanup.
+4. **AI Assisted** — strongest experimental restoration for difficult document photos.
 
 ## Upload
-Replace the current repository files with the contents of this package, including the `assets` folder.
-After deployment, open the site and confirm you can see **release v0.7** below the splash screen.
+Replace the current repository files with the contents of this package, including the `assets` and `icons` folders.
+After GitHub Pages deploys, confirm the home screen says **release v0.9**.

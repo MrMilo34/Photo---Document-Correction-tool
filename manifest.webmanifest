@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "DocMesh document correction with manual shape control, safe Corrected cleanup, and an experimental AI Assisted restoration mode for harder document photos.",
+  "description": "DocMesh document correction with manual shape control, improved page flattening, true grayscale, balanced Corrected cleanup, and a stronger AI Assisted restore mode.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",

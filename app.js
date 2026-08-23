@@ -18,7 +18,7 @@ let correctedOriginal = null;
 let correctedImage = null;
 let aiAssistImage = null;
 let adjustedImage = null;
-let bwImage = null;
+let grayscaleImageCache = null;
 let currentMode = 'corrected';
 let adjustTimer = null;
 const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
@@ -323,12 +323,27 @@ function samplePolyline(ps,t){
   let target=t*total,acc=0;for(let i=0;i<lens.length;i++){if(target<=acc+lens[i]||i===lens.length-1){const f=lens[i]?((target-acc)/lens[i]):0;return{x:ps[i].x+(ps[i+1].x-ps[i].x)*f,y:ps[i].y+(ps[i+1].y-ps[i].y)*f};}acc+=lens[i];}return ps[ps.length-1];
 }
 
+function chooseDocumentRatio(rawRatio){
+  const portrait=[8.5/11, 1/Math.sqrt(2), 8.5/14, 1.0];
+  const candidates = rawRatio >= 1 ? portrait.map(r=>1/r) : portrait;
+  let best=rawRatio, bestErr=Infinity;
+  for(const r of candidates){
+    const err=Math.abs(Math.log(rawRatio/r));
+    if(err<bestErr){ bestErr=err; best=r; }
+  }
+  return bestErr < 0.18 ? best : rawRatio;
+}
+
 function makeCorrected(){
   const top=getEdgePoints(0,1), right=getEdgePoints(1,2), bottom=getEdgePoints(2,3), left=getEdgePoints(3,0);
   if([top,right,bottom,left].some(e=>e.length<2)) throw new Error('Invalid perimeter');
-  const w0=(polyLength(top)+polyLength(bottom))/2, h0=(polyLength(left)+polyLength(right))/2;
-  const maxOut=2000, scale=Math.min(1,maxOut/Math.max(w0,h0));
-  const W=Math.max(320,Math.round(w0*scale)), H=Math.max(320,Math.round(h0*scale));
+  const rawW=(polyLength(top)+polyLength(bottom))/2, rawH=(polyLength(left)+polyLength(right))/2;
+  const rawRatio=rawW/Math.max(rawH,1), snappedRatio=chooseDocumentRatio(rawRatio);
+  const maxOut=2000, baseScale=Math.min(1,maxOut/Math.max(rawW,rawH));
+  const area=Math.max(320*320, rawW*rawH*baseScale*baseScale);
+  let W=Math.max(320,Math.round(Math.sqrt(area*snappedRatio))), H=Math.max(320,Math.round(Math.sqrt(area/snappedRatio)));
+  const fit=Math.min(1,maxOut/Math.max(W,H));
+  W=Math.max(320,Math.round(W*fit)); H=Math.max(320,Math.round(H*fit));
   workingCanvas.width=W;workingCanvas.height=H;
   const src=sctx.getImageData(0,0,sourceCanvas.width,sourceCanvas.height), sd=src.data;
   const out=wctx.createImageData(W,H), od=out.data, sw=sourceCanvas.width,sh=sourceCanvas.height;
@@ -434,71 +449,87 @@ function cleanupImage(img){
 
 
 function aggressiveCleanupImage(img){
-  // Experimental restoration mode: stronger paper cleanup, heavier shadow lifting,
-  // and more assertive clarity restoration for difficult handheld shots.
-  const base = cleanupImage(img);
-  const W=base.width,H=base.height, src=base.data;
-  const out=new ImageData(new Uint8ClampedArray(src),W,H), d=out.data;
-  const step=Math.max(10,Math.round(Math.max(W,H)/120)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
-  const lumGrid=new Float32Array(count), weightGrid=new Float32Array(count), paperGrid=new Float32Array(count);
+  // Strongest experimental restore mode: cleaner paper, darker ink, and a crisper scan-like look.
+  const W=img.width,H=img.height, src=img.data;
+  const step=Math.max(14,Math.round(Math.max(W,H)/92)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
+  const bgR=new Float32Array(count), bgG=new Float32Array(count), bgB=new Float32Array(count), bgW=new Float32Array(count);
+
   for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
-    const i=(y*W+x)*4;
-    const r=src[i], g=src[i+1], b=src[i+2];
+    const i=(y*W+x)*4, r=src[i], g=src[i+1], b=src[i+2];
     const lum=.299*r+.587*g+.114*b;
-    const w=Math.pow(clamp((lum-70)/185,0,1),1.05)+0.07;
-    const paper=Math.max(r,g,b);
+    const sat=(Math.max(r,g,b)-Math.min(r,g,b))/Math.max(1,Math.max(r,g,b));
+    const paperWeight=Math.pow(clamp((lum-110)/145,0,1),1.3) * (0.9 + (1-sat)*0.25) + 0.05;
     const cell=Math.floor(y/step)*gw+Math.floor(x/step);
-    lumGrid[cell]+=lum*w; paperGrid[cell]+=paper*w; weightGrid[cell]+=w;
+    bgR[cell]+=r*paperWeight; bgG[cell]+=g*paperWeight; bgB[cell]+=b*paperWeight; bgW[cell]+=paperWeight;
   }
   for(let i=0;i<count;i++){
-    if(weightGrid[i]>.001){ lumGrid[i]/=weightGrid[i]; paperGrid[i]/=weightGrid[i]; }
-    else { lumGrid[i]=236; paperGrid[i]=244; }
+    if(bgW[i]>.001){ bgR[i]/=bgW[i]; bgG[i]/=bgW[i]; bgB[i]/=bgW[i]; }
+    else { bgR[i]=244; bgG[i]=244; bgB[i]=244; }
   }
-  for(let pass=0; pass<7; pass++){
-    const nextLum=new Float32Array(count), nextPaper=new Float32Array(count);
+  for(let pass=0; pass<5; pass++){
+    const nR=new Float32Array(count), nG=new Float32Array(count), nB=new Float32Array(count);
     for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
-      let sl=0, sp=0, w=0;
-      for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++) for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
-        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?6:((Math.abs(dx)+Math.abs(dy)===1)?3:1);
-        sl+=lumGrid[idx]*wt; sp+=paperGrid[idx]*wt; w+=wt;
+      let sr=0,sg=0,sb=0,w=0;
+      for(let yy=Math.max(0,y-2); yy<=Math.min(gh-1,y+2); yy++) for(let xx=Math.max(0,x-2); xx<=Math.min(gw-1,x+2); xx++){
+        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?4:((Math.abs(dx)+Math.abs(dy)===1)?2:1);
+        sr+=bgR[idx]*wt; sg+=bgG[idx]*wt; sb+=bgB[idx]*wt; w+=wt;
       }
-      const idx=y*gw+x; nextLum[idx]=sl/w; nextPaper[idx]=sp/w;
+      const idx=y*gw+x; nR[idx]=sr/w; nG[idx]=sg/w; nB[idx]=sb/w;
     }
-    lumGrid.set(nextLum); paperGrid.set(nextPaper);
+    bgR.set(nR); bgG.set(nG); bgB.set(nB);
   }
-  let p=0;
+
+  const flat = new Uint8ClampedArray(src.length);
+  const lum = new Float32Array(W*H);
+  let p=0, li=0;
   for(let y=0;y<H;y++){
     const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)), y1=Math.min(gh-1,y0+1), fy=gy-y0;
-    for(let x=0;x<W;x++,p+=4){
+    for(let x=0;x<W;x++,p+=4,li++){
       const gx=x/step, x0=Math.min(gw-1,Math.floor(gx)), x1=Math.min(gw-1,x0+1), fx=gx-x0;
       const i00=y0*gw+x0, i10=y0*gw+x1, i01=y1*gw+x0, i11=y1*gw+x1;
       const interp=(arr)=>{const a=arr[i00]*(1-fx)+arr[i10]*fx, b=arr[i01]*(1-fx)+arr[i11]*fx; return a*(1-fy)+b*fy;};
-      const illum=interp(lumGrid), paper=interp(paperGrid);
-      const shadowBoost=clamp((246-illum)/110,0,1);
-      const paperBoost=clamp((248-paper)/85,0,1);
-      const avg=(src[p]+src[p+1]+src[p+2])/3;
-      for(let c=0;c<3;c++){
-        let v=src[p+c];
-        v=v*(1-(0.08+shadowBoost*0.06)) + avg*(0.08+shadowBoost*0.06);
-        v=v*(1.04 + shadowBoost*0.30 + paperBoost*0.10);
-        v=(v-128)*(1.11 + shadowBoost*0.07)+128;
-        if(v>198) v=198 + (v-198)*(1.42 + paperBoost*0.12);
-        if(v<40) v=40 + (v-40)*0.78;
-        d[p+c]=clamp(v,0,255);
-      }
-      d[p+3]=255;
+      const br=interp(bgR), bg=interp(bgG), bb=interp(bgB);
+      let r=src[p]*248/Math.max(120,br), g=src[p+1]*248/Math.max(120,bg), b=src[p+2]*248/Math.max(120,bb);
+      const avg=(r+g+b)/3;
+      // Pull mild colour cast out of the paper while preserving strongly coloured accents.
+      const sat=(Math.max(r,g,b)-Math.min(r,g,b))/Math.max(1,Math.max(r,g,b));
+      const castPull=0.10 + clamp((232-avg)/140,0,1)*0.10;
+      r=r*(1-castPull)+avg*castPull; g=g*(1-castPull)+avg*castPull; b=b*(1-castPull)+avg*castPull;
+      r=clamp((r-128)*1.06+128 + 8,0,255); g=clamp((g-128)*1.06+128 + 8,0,255); b=clamp((b-128)*1.06+128 + 8,0,255);
+      flat[p]=r; flat[p+1]=g; flat[p+2]=b; flat[p+3]=255;
+      lum[li]=.299*r+.587*g+.114*b;
     }
   }
-  const tmp=new Uint8ClampedArray(d);
-  for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
-    const i=(y*W+x)*4;
-    for(let c=0;c<3;c++){
-      const up=((y-1)*W+x)*4+c, dn=((y+1)*W+x)*4+c, lf=(y*W+x-1)*4+c, rt=(y*W+x+1)*4+c;
-      const blur=(tmp[up]+tmp[dn]+tmp[lf]+tmp[rt])*0.25;
-      let v=tmp[i+c] + (tmp[i+c]-blur)*0.40;
-      const edge=Math.abs(tmp[i+c]-blur);
-      if(edge < 4) v = v*0.82 + blur*0.18;
-      d[i+c]=clamp(v,0,255);
+
+  const out=new ImageData(W,H), d=out.data;
+  p=0; li=0;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++,p+=4,li++){
+      const l=lum[li];
+      const up=lum[Math.max(0,y-1)*W+x], dn=lum[Math.min(H-1,y+1)*W+x], lf=lum[y*W+Math.max(0,x-1)], rt=lum[y*W+Math.min(W-1,x+1)];
+      const blur=(up+dn+lf+rt)*0.25;
+      const edge=Math.abs(l-blur);
+      const fr=flat[p], fg=flat[p+1], fb=flat[p+2];
+      const maxc=Math.max(fr,fg,fb), minc=Math.min(fr,fg,fb), sat=(maxc-minc)/Math.max(1,maxc);
+      const isColorAccent = sat > 0.15 && l < 245;
+      const ink = clamp((242-l)/105,0,1);
+      const edgeInk = clamp(edge/22,0,1)*0.45;
+      const strength = clamp(ink + edgeInk, 0, 1);
+      if(isColorAccent && strength < 0.55){
+        // Preserve coloured logos / lines while brightening the surrounding paper.
+        d[p]=clamp(fr*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
+        d[p+1]=clamp(fg*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
+        d[p+2]=clamp(fb*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
+      }else{
+        let v;
+        if(strength < 0.035) v = 255;
+        else v = 255 - Math.pow(strength,0.78)*248;
+        // Sharpen text/ink slightly.
+        if(edge > 10 && strength > 0.10) v -= Math.min(28, edge*0.55);
+        v=clamp(v,0,255);
+        d[p]=d[p+1]=d[p+2]=v;
+      }
+      d[p+3]=255;
     }
   }
   return out;
@@ -527,12 +558,18 @@ function applyAdjustments(img, a=adjustments){
   return out;
 }
 
-function blackWhiteImage(img){
+function grayscaleImage(img){
+  // True tonal grayscale: preserve the full range of light and dark values instead of thresholding to black/white.
   const W=img.width,H=img.height,s=img.data,out=new ImageData(W,H),d=out.data;
-  const step=Math.max(16,Math.round(Math.max(W,H)/100)),gw=Math.ceil(W/step),gh=Math.ceil(H/step),grid=new Float32Array(gw*gh),cnt=new Uint32Array(gw*gh);
-  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){const i=(y*W+x)*4,k=Math.floor(y/step)*gw+Math.floor(x/step);grid[k]+=.299*s[i]+.587*s[i+1]+.114*s[i+2];cnt[k]++;}
-  for(let i=0;i<grid.length;i++)grid[i]=cnt[i]?grid[i]/cnt[i]:200;
-  let p=0;for(let y=0;y<H;y++){for(let x=0;x<W;x++,p+=4){const g=.299*s[p]+.587*s[p+1]+.114*s[p+2],local=grid[Math.min(gh-1,Math.floor(y/step))*gw+Math.min(gw-1,Math.floor(x/step))],t=local-26;const v=g>t?255:0;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255;}}return out;
+  for(let p=0;p<s.length;p+=4){
+    let g=.2126*s[p]+.7152*s[p+1]+.0722*s[p+2];
+    // A very small contrast lift keeps text readable without turning the page into a photocopy.
+    g=(g-128)*1.035+128;
+    g=clamp(g,0,255);
+    d[p]=d[p+1]=d[p+2]=g;
+    d[p+3]=255;
+  }
+  return out;
 }
 
 function displayImage(img){resultCanvas.width=img.width;resultCanvas.height=img.height;rctx.putImageData(img,0,0);}
@@ -545,7 +582,7 @@ function resetAdjustments(render=false){
 }
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Straightening document…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;bwImage=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
@@ -554,7 +591,7 @@ async function setMode(mode){
   $('adjustPanel').classList.toggle('hidden',mode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',mode!=='assist');
   if(mode==='assist'&&!aiAssistImage){busy(true,'Running AI Assisted restore…');await new Promise(r=>setTimeout(r,35));}
-  else if(mode==='bw'&&!bwImage){busy(true,'Making greyscale scan…');await new Promise(r=>setTimeout(r,30));}
+  else if(mode==='bw'&&!grayscaleImageCache){busy(true,'Making grayscale image…');await new Promise(r=>setTimeout(r,30));}
   try{
     if(mode==='corrected') {
       correctedImage ||= cleanupImage(correctedOriginal);
@@ -570,8 +607,8 @@ async function setMode(mode){
     }
     else {
       correctedImage ||= cleanupImage(correctedOriginal);
-      bwImage ||= blackWhiteImage(correctedImage);
-      displayImage(bwImage);
+      grayscaleImageCache ||= grayscaleImage(correctedImage);
+      displayImage(grayscaleImageCache);
     }
     setModeButtons();
   }finally{busy(false);}
@@ -625,4 +662,4 @@ $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.7', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.9', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
