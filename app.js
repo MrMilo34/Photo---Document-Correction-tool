@@ -434,60 +434,71 @@ function cleanupImage(img){
 
 
 function aggressiveCleanupImage(img){
-  // Stronger cleanup mode: build on the balanced correction and push shadow removal and clarity further.
+  // Experimental restoration mode: stronger paper cleanup, heavier shadow lifting,
+  // and more assertive clarity restoration for difficult handheld shots.
   const base = cleanupImage(img);
   const W=base.width,H=base.height, src=base.data;
   const out=new ImageData(new Uint8ClampedArray(src),W,H), d=out.data;
-  const step=Math.max(14,Math.round(Math.max(W,H)/96)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
-  const lumGrid=new Float32Array(count), weightGrid=new Float32Array(count);
+  const step=Math.max(10,Math.round(Math.max(W,H)/120)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
+  const lumGrid=new Float32Array(count), weightGrid=new Float32Array(count), paperGrid=new Float32Array(count);
   for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
     const i=(y*W+x)*4;
-    const lum=.299*src[i]+.587*src[i+1]+.114*src[i+2];
-    const w=Math.pow(clamp((lum-90)/150,0,1),1.3)+0.05;
+    const r=src[i], g=src[i+1], b=src[i+2];
+    const lum=.299*r+.587*g+.114*b;
+    const w=Math.pow(clamp((lum-70)/185,0,1),1.05)+0.07;
+    const paper=Math.max(r,g,b);
     const cell=Math.floor(y/step)*gw+Math.floor(x/step);
-    lumGrid[cell]+=lum*w; weightGrid[cell]+=w;
+    lumGrid[cell]+=lum*w; paperGrid[cell]+=paper*w; weightGrid[cell]+=w;
   }
-  for(let i=0;i<count;i++) lumGrid[i]=weightGrid[i]>.001 ? lumGrid[i]/weightGrid[i] : 238;
-  for(let pass=0; pass<5; pass++){
-    const next=new Float32Array(count);
+  for(let i=0;i<count;i++){
+    if(weightGrid[i]>.001){ lumGrid[i]/=weightGrid[i]; paperGrid[i]/=weightGrid[i]; }
+    else { lumGrid[i]=236; paperGrid[i]=244; }
+  }
+  for(let pass=0; pass<7; pass++){
+    const nextLum=new Float32Array(count), nextPaper=new Float32Array(count);
     for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
-      let s=0,w=0;
+      let sl=0, sp=0, w=0;
       for(let yy=Math.max(0,y-2);yy<=Math.min(gh-1,y+2);yy++) for(let xx=Math.max(0,x-2);xx<=Math.min(gw-1,x+2);xx++){
-        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?4:((Math.abs(dx)+Math.abs(dy)===1)?2:1);
-        s+=lumGrid[idx]*wt; w+=wt;
+        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?6:((Math.abs(dx)+Math.abs(dy)===1)?3:1);
+        sl+=lumGrid[idx]*wt; sp+=paperGrid[idx]*wt; w+=wt;
       }
-      next[y*gw+x]=s/w;
+      const idx=y*gw+x; nextLum[idx]=sl/w; nextPaper[idx]=sp/w;
     }
-    lumGrid.set(next);
+    lumGrid.set(nextLum); paperGrid.set(nextPaper);
   }
   let p=0;
   for(let y=0;y<H;y++){
     const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)), y1=Math.min(gh-1,y0+1), fy=gy-y0;
     for(let x=0;x<W;x++,p+=4){
       const gx=x/step, x0=Math.min(gw-1,Math.floor(gx)), x1=Math.min(gw-1,x0+1), fx=gx-x0;
-      const a=lumGrid[y0*gw+x0]*(1-fx)+lumGrid[y0*gw+x1]*fx;
-      const b=lumGrid[y1*gw+x0]*(1-fx)+lumGrid[y1*gw+x1]*fx;
-      const illum=a*(1-fy)+b*fy;
-      const shadowBoost=clamp((240-illum)/120,0,1);
+      const i00=y0*gw+x0, i10=y0*gw+x1, i01=y1*gw+x0, i11=y1*gw+x1;
+      const interp=(arr)=>{const a=arr[i00]*(1-fx)+arr[i10]*fx, b=arr[i01]*(1-fx)+arr[i11]*fx; return a*(1-fy)+b*fy;};
+      const illum=interp(lumGrid), paper=interp(paperGrid);
+      const shadowBoost=clamp((246-illum)/110,0,1);
+      const paperBoost=clamp((248-paper)/85,0,1);
+      const avg=(src[p]+src[p+1]+src[p+2])/3;
       for(let c=0;c<3;c++){
         let v=src[p+c];
-        v=v*(1.02+shadowBoost*0.22);
-        v=(v-128)*(1.07+shadowBoost*0.06)+128;
-        if(v>214) v=214+(v-214)*1.24;
+        v=v*(1-(0.08+shadowBoost*0.06)) + avg*(0.08+shadowBoost*0.06);
+        v=v*(1.04 + shadowBoost*0.30 + paperBoost*0.10);
+        v=(v-128)*(1.11 + shadowBoost*0.07)+128;
+        if(v>198) v=198 + (v-198)*(1.42 + paperBoost*0.12);
+        if(v<40) v=40 + (v-40)*0.78;
         d[p+c]=clamp(v,0,255);
       }
       d[p+3]=255;
     }
   }
-  // Stronger local sharpening, but only from neighbouring source pixels.
   const tmp=new Uint8ClampedArray(d);
   for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
-    const p=(y*W+x)*4;
+    const i=(y*W+x)*4;
     for(let c=0;c<3;c++){
       const up=((y-1)*W+x)*4+c, dn=((y+1)*W+x)*4+c, lf=(y*W+x-1)*4+c, rt=(y*W+x+1)*4+c;
       const blur=(tmp[up]+tmp[dn]+tmp[lf]+tmp[rt])*0.25;
-      let v=tmp[p+c]+(tmp[p+c]-blur)*0.26;
-      d[p+c]=clamp(v,0,255);
+      let v=tmp[i+c] + (tmp[i+c]-blur)*0.40;
+      const edge=Math.abs(tmp[i+c]-blur);
+      if(edge < 4) v = v*0.82 + blur*0.18;
+      d[i+c]=clamp(v,0,255);
     }
   }
   return out;
@@ -542,7 +553,7 @@ async function setMode(mode){
   currentMode=mode;
   $('adjustPanel').classList.toggle('hidden',mode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',mode!=='assist');
-  if(mode==='assist'&&!aiAssistImage){busy(true,'Running AI Assisted cleanup…');await new Promise(r=>setTimeout(r,35));}
+  if(mode==='assist'&&!aiAssistImage){busy(true,'Running AI Assisted restore…');await new Promise(r=>setTimeout(r,35));}
   else if(mode==='bw'&&!bwImage){busy(true,'Making greyscale scan…');await new Promise(r=>setTimeout(r,30));}
   try{
     if(mode==='corrected') {
@@ -614,4 +625,4 @@ $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
 
-// Service worker intentionally disabled in v0.5.2 so GitHub Pages updates cannot be hidden by stale offline cache.
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.7', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

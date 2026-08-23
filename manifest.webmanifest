@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "Perspective and curved-edge correction, manual image adjustments, greyscale scan mode, balanced corrected cleanup, and aggressive AI Assisted cleanup for photographed documents.",
+  "description": "DocMesh document correction with manual shape control, safe Corrected cleanup, and an experimental AI Assisted restoration mode for harder document photos.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",
