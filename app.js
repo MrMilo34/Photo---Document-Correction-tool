@@ -449,29 +449,33 @@ function cleanupImage(img){
 
 
 function aggressiveCleanupImage(img){
-  // Strongest experimental restore mode: cleaner paper, darker ink, and a crisper scan-like look.
-  const W=img.width,H=img.height, src=img.data;
-  const step=Math.max(14,Math.round(Math.max(W,H)/92)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
+  // Strongest full-colour restoration mode.
+  // Goal: keep the document looking like a cleaned photo / screen image, not a photocopy.
+  const base = cleanupImage(img);
+  const W=base.width,H=base.height, src=base.data;
+  const step=Math.max(16,Math.round(Math.max(W,H)/88)), gw=Math.ceil(W/step), gh=Math.ceil(H/step), count=gw*gh;
   const bgR=new Float32Array(count), bgG=new Float32Array(count), bgB=new Float32Array(count), bgW=new Float32Array(count);
 
   for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){
     const i=(y*W+x)*4, r=src[i], g=src[i+1], b=src[i+2];
+    const maxv=Math.max(r,g,b), minv=Math.min(r,g,b);
     const lum=.299*r+.587*g+.114*b;
-    const sat=(Math.max(r,g,b)-Math.min(r,g,b))/Math.max(1,Math.max(r,g,b));
-    const paperWeight=Math.pow(clamp((lum-110)/145,0,1),1.3) * (0.9 + (1-sat)*0.25) + 0.05;
+    const sat=(maxv-minv)/Math.max(1,maxv);
+    // background weight prefers bright, low-saturation paper while still tolerating coloured paper slightly
+    const w=(Math.pow(clamp((lum-100)/150,0,1),1.2) * (1.15 - Math.min(.55,sat*0.9))) + 0.04;
     const cell=Math.floor(y/step)*gw+Math.floor(x/step);
-    bgR[cell]+=r*paperWeight; bgG[cell]+=g*paperWeight; bgB[cell]+=b*paperWeight; bgW[cell]+=paperWeight;
+    bgR[cell]+=r*w; bgG[cell]+=g*w; bgB[cell]+=b*w; bgW[cell]+=w;
   }
   for(let i=0;i<count;i++){
     if(bgW[i]>.001){ bgR[i]/=bgW[i]; bgG[i]/=bgW[i]; bgB[i]/=bgW[i]; }
-    else { bgR[i]=244; bgG[i]=244; bgB[i]=244; }
+    else { bgR[i]=246; bgG[i]=246; bgB[i]=246; }
   }
-  for(let pass=0; pass<5; pass++){
+  for(let pass=0; pass<4; pass++){
     const nR=new Float32Array(count), nG=new Float32Array(count), nB=new Float32Array(count);
     for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
       let sr=0,sg=0,sb=0,w=0;
       for(let yy=Math.max(0,y-2); yy<=Math.min(gh-1,y+2); yy++) for(let xx=Math.max(0,x-2); xx<=Math.min(gw-1,x+2); xx++){
-        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?4:((Math.abs(dx)+Math.abs(dy)===1)?2:1);
+        const dx=xx-x, dy=yy-y, idx=yy*gw+xx, wt=(dx===0&&dy===0)?5:((Math.abs(dx)+Math.abs(dy)===1)?3:1);
         sr+=bgR[idx]*wt; sg+=bgG[idx]*wt; sb+=bgB[idx]*wt; w+=wt;
       }
       const idx=y*gw+x; nR[idx]=sr/w; nG[idx]=sg/w; nB[idx]=sb/w;
@@ -479,8 +483,8 @@ function aggressiveCleanupImage(img){
     bgR.set(nR); bgG.set(nG); bgB.set(nB);
   }
 
-  const flat = new Uint8ClampedArray(src.length);
-  const lum = new Float32Array(W*H);
+  const normalized=new Uint8ClampedArray(src.length);
+  const lumBuf=new Float32Array(W*H);
   let p=0, li=0;
   for(let y=0;y<H;y++){
     const gy=y/step, y0=Math.min(gh-1,Math.floor(gy)), y1=Math.min(gh-1,y0+1), fy=gy-y0;
@@ -489,15 +493,19 @@ function aggressiveCleanupImage(img){
       const i00=y0*gw+x0, i10=y0*gw+x1, i01=y1*gw+x0, i11=y1*gw+x1;
       const interp=(arr)=>{const a=arr[i00]*(1-fx)+arr[i10]*fx, b=arr[i01]*(1-fx)+arr[i11]*fx; return a*(1-fy)+b*fy;};
       const br=interp(bgR), bg=interp(bgG), bb=interp(bgB);
-      let r=src[p]*248/Math.max(120,br), g=src[p+1]*248/Math.max(120,bg), b=src[p+2]*248/Math.max(120,bb);
+      let r=src[p], g=src[p+1], b=src[p+2];
+      // illumination / cast normalization with restrained gains
+      const gl=clamp(248/Math.max(115,.299*br+.587*bg+.114*bb),0.9,1.45);
+      const gr=clamp(246/Math.max(122,br),0.9,1.38), gg=clamp(246/Math.max(122,bg),0.9,1.38), gb=clamp(246/Math.max(122,bb),0.9,1.38);
+      r=r*(gr*0.55+gl*0.45); g=g*(gg*0.55+gl*0.45); b=b*(gb*0.55+gl*0.45);
+      // gentle paper whitening without collapsing colours
       const avg=(r+g+b)/3;
-      // Pull mild colour cast out of the paper while preserving strongly coloured accents.
-      const sat=(Math.max(r,g,b)-Math.min(r,g,b))/Math.max(1,Math.max(r,g,b));
-      const castPull=0.10 + clamp((232-avg)/140,0,1)*0.10;
-      r=r*(1-castPull)+avg*castPull; g=g*(1-castPull)+avg*castPull; b=b*(1-castPull)+avg*castPull;
-      r=clamp((r-128)*1.06+128 + 8,0,255); g=clamp((g-128)*1.06+128 + 8,0,255); b=clamp((b-128)*1.06+128 + 8,0,255);
-      flat[p]=r; flat[p+1]=g; flat[p+2]=b; flat[p+3]=255;
-      lum[li]=.299*r+.587*g+.114*b;
+      const shadowLift=clamp((236-avg)/140,0,1);
+      r=(r-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
+      g=(g-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
+      b=(b-128)*(1.04+shadowLift*0.05)+128+6+shadowLift*10;
+      normalized[p]=clamp(r,0,255); normalized[p+1]=clamp(g,0,255); normalized[p+2]=clamp(b,0,255); normalized[p+3]=255;
+      lumBuf[li]=.299*normalized[p]+.587*normalized[p+1]+.114*normalized[p+2];
     }
   }
 
@@ -505,31 +513,35 @@ function aggressiveCleanupImage(img){
   p=0; li=0;
   for(let y=0;y<H;y++){
     for(let x=0;x<W;x++,p+=4,li++){
-      const l=lum[li];
-      const up=lum[Math.max(0,y-1)*W+x], dn=lum[Math.min(H-1,y+1)*W+x], lf=lum[y*W+Math.max(0,x-1)], rt=lum[y*W+Math.min(W-1,x+1)];
-      const blur=(up+dn+lf+rt)*0.25;
-      const edge=Math.abs(l-blur);
-      const fr=flat[p], fg=flat[p+1], fb=flat[p+2];
-      const maxc=Math.max(fr,fg,fb), minc=Math.min(fr,fg,fb), sat=(maxc-minc)/Math.max(1,maxc);
-      const isColorAccent = sat > 0.15 && l < 245;
-      const ink = clamp((242-l)/105,0,1);
-      const edgeInk = clamp(edge/22,0,1)*0.45;
-      const strength = clamp(ink + edgeInk, 0, 1);
-      if(isColorAccent && strength < 0.55){
-        // Preserve coloured logos / lines while brightening the surrounding paper.
-        d[p]=clamp(fr*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
-        d[p+1]=clamp(fg*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
-        d[p+2]=clamp(fb*(0.84+strength*0.18)+255*(0.14-strength*0.08),0,255);
-      }else{
-        let v;
-        if(strength < 0.035) v = 255;
-        else v = 255 - Math.pow(strength,0.78)*248;
-        // Sharpen text/ink slightly.
-        if(edge > 10 && strength > 0.10) v -= Math.min(28, edge*0.55);
-        v=clamp(v,0,255);
-        d[p]=d[p+1]=d[p+2]=v;
+      const i=p;
+      let r=normalized[i], g=normalized[i+1], b=normalized[i+2];
+      const l=lumBuf[li];
+      if(x>0&&x<W-1&&y>0&&y<H-1){
+        for(const c of [0,1,2]){
+          const up=normalized[((y-1)*W+x)*4+c], dn=normalized[((y+1)*W+x)*4+c], lf=normalized[(y*W+x-1)*4+c], rt=normalized[(y*W+x+1)*4+c];
+          const blur=(up+dn+lf+rt)*0.25;
+          let v=(c===0?r:(c===1?g:b));
+          const edge=Math.abs(v-blur);
+          v = v + (v-blur) * (0.12 + Math.min(0.08, edge/255*0.18));
+          if(c===0) r=v; else if(c===1) g=v; else b=v;
+        }
       }
-      d[p+3]=255;
+      const maxv=Math.max(r,g,b), minv=Math.min(r,g,b), sat=(maxv-minv)/Math.max(1,maxv);
+      const isColorAccent=sat>0.12 && l<250;
+      if(!isColorAccent){
+        // push near-paper pixels closer to white but keep ink dark
+        const ink=clamp((232-l)/120,0,1);
+        const whitePull=clamp((l-150)/105,0,1)*(1-ink*0.65);
+        r=r*(1-whitePull)+255*whitePull;
+        g=g*(1-whitePull)+255*whitePull;
+        b=b*(1-whitePull)+255*whitePull;
+      }else{
+        // preserve accents a touch better
+        const avg=(r+g+b)/3;
+        const boost=1.02;
+        r=avg + (r-avg)*boost; g=avg + (g-avg)*boost; b=avg + (b-avg)*boost;
+      }
+      d[i]=clamp(r,0,255); d[i+1]=clamp(g,0,255); d[i+2]=clamp(b,0,255); d[i+3]=255;
     }
   }
   return out;
@@ -662,4 +674,4 @@ $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
 $('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.9', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=0.10', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

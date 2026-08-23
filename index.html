@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>DocMesh</title>
-  <link rel="manifest" href="manifest.webmanifest?v=0.9" />
-  <link rel="icon" href="icons/icon-192.png?v=0.9" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=0.9" />
-  <link rel="stylesheet" href="styles.css?v=0.9" />
+  <link rel="manifest" href="manifest.webmanifest?v=0.10" />
+  <link rel="icon" href="icons/icon-192.png?v=0.10" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=0.10" />
+  <link rel="stylesheet" href="styles.css?v=0.10" />
 </head>
 <body>
   <header class="topbar">
@@ -25,7 +25,7 @@
       <div class="hero-card splash-card">
         <img class="home-splash" src="assets/home-splash.png?v=0.9" alt="DocMesh splash screen" />
       </div>
-      <div class="version-tag">release v0.9</div>
+      <div class="version-tag">release v0.10</div>
 
       <div class="home-actions">
         <label class="primary big-btn">📷 Take Photo
@@ -100,30 +100,30 @@
 
       <section id="aiAssistPanel" class="assist-panel hidden">
         <div class="assist-badge">✦</div>
-        <div><strong>AI Assisted restore</strong><span>Runs the most aggressive restoration pass. It pushes paper cleanup, clarity and shadow removal much harder to create a cleaner scan-like result while still aiming to keep the visible information the same.</span></div>
+        <div><strong>AI Assisted restore</strong><span>Runs the strongest restoration pass. It keeps full colour, pushes shadow removal and paper cleanup much harder, and aims for a cleaner screen-like scan while keeping the visible information the same.</span></div>
       </section>
 
-      <div class="mode-tip">Tip: use <strong>AI Assisted</strong> for harder images with shadows, glare, fingers, or uneven lighting when you want a cleaner scan-like result.</div>
+      <div class="mode-tip">Tip: use <strong>AI Assisted</strong> when you want the strongest cleanup without switching into black-and-white.</div>
 
       <div class="result-actions">
         <button id="shareBtn">↗ Share</button>
         <button id="savePngBtn" class="primary">Save PNG</button>
       </div>
-      <p class="safe-note">Corrected is the safer balanced cleanup. AI Assisted is the strongest experimental restore mode and is best for difficult images with shadows, glare, fingers or uneven lighting while still aiming to keep the visible information the same.</p>
+      <p class="safe-note">Corrected is the safer balanced cleanup. AI Assisted is the strongest full-colour cleanup mode and is best for difficult images with shadows, glare, fingers or uneven lighting.</p>
     </section>
   </main>
 
   <dialog id="aboutDialog">
-    <h2>DocMesh v0.9</h2>
+    <h2>DocMesh v0.10</h2>
     <p>The perimeter points define the real page boundary and the app dewarps the photographed pixels into a flat document.</p>
     <p><strong>AI Assist</strong> now has two cleanup levels: Corrected for balanced cleanup and AI Assisted for a more aggressive restoration pass that aims for a cleaner scan-like result.</p>
-    <p><strong>v0.9:</strong> keeps the v0.8 geometry and AI improvements, and replaces the harsh photocopy-style filter with true smooth grayscale.</p>
+    <p><strong>v0.10:</strong> fixes AI Assisted so it stays full-colour instead of looking like a photocopy, and tightens the app icon treatment.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=0.9"></script>
+  <script src="app.js?v=0.10"></script>
 </body>
 </html>

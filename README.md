@@ -1,20 +1,16 @@
-# DocMesh v0.9
+# DocMesh v0.10
 
 ## What changed
-- Carries forward the v0.8 page-proportion correction improvements.
-- Carries forward the stronger **AI Assisted** restore mode.
-- Carries forward the improved mobile layout for the **AI Assisted** button.
-- Replaces the old harsh photocopy-style filter with **true Grayscale**.
-- Grayscale now removes colour while preserving smooth tonal detail, shadows, gray text, and photograph detail instead of forcing pixels to pure black or white.
-- Keeps the approved DocMesh splash screen.
-- Bumps the cache version so GitHub Pages should pick up v0.9 cleanly.
+- Fixes **AI Assisted** so it stays a strong **full-colour cleanup mode** instead of collapsing into a photocopy / black-and-white look.
+- Keeps the document closer to a cleaned screen image: brighter paper, lifted shadows, preserved coloured accents, and darker crisp text.
+- Keeps **Greyscale** as true smooth grayscale.
+- Tightens the circular AI icon treatment and updates the manifest icons to `maskable` to help avoid odd oval-looking badges in Android/PWA surfaces.
+- Keeps the geometry improvements from v0.8/v0.9.
 
-## Result modes
-1. **Adjust** — manual image controls.
-2. **Grayscale** — smooth grayscale conversion with full tonal range.
-3. **Corrected** — balanced document cleanup.
-4. **AI Assisted** — strongest experimental restoration for difficult document photos.
+## Notes
+- **Corrected** remains the safer balanced cleanup mode.
+- **AI Assisted** is now the strongest full-colour cleanup mode for difficult images.
 
 ## Upload
-Replace the current repository files with the contents of this package, including the `assets` and `icons` folders.
-After GitHub Pages deploys, confirm the home screen says **release v0.9**.
+Replace the current repository files with the contents of this package.
+After deployment, confirm you can see **DocMesh v0.10** in About or **release v0.10** on the home screen.

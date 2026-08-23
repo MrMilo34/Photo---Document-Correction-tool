@@ -1,12 +1,12 @@
-const CACHE = 'docmesh-v0.9.0';
+const CACHE = 'docmesh-v0.10.0';
 const CORE = [
   './',
   './index.html',
-  './styles.css?v=0.9',
-  './app.js?v=0.9',
-  './manifest.webmanifest?v=0.9',
-  './icons/icon-192.png?v=0.9',
-  './icons/icon-512.png',
+  './styles.css?v=0.10',
+  './app.js?v=0.10',
+  './manifest.webmanifest?v=0.10',
+  './icons/icon-192.png?v=0.10',
+  './icons/icon-512.png?v=0.10',
   './assets/home-splash.png?v=0.9'
 ];
 self.addEventListener('install', event => {

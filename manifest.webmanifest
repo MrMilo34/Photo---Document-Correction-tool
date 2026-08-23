@@ -1,7 +1,7 @@
 {
   "name": "DocMesh",
   "short_name": "DocMesh",
-  "description": "DocMesh document correction with manual shape control, improved page flattening, true grayscale, balanced Corrected cleanup, and a stronger AI Assisted restore mode.",
+  "description": "DocMesh document correction with manual shape control, true grayscale, balanced Corrected cleanup, and a stronger full-colour AI Assisted restore mode.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",
@@ -12,13 +12,13 @@
       "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }
