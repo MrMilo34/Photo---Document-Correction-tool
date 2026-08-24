@@ -109,14 +109,14 @@ function resizeHomeMesh(){
   homeMeshCtx=homeMeshCanvas.getContext('2d');
   homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
   const count=clamp(Math.round(rect.width*rect.height/11000),48,84);
-  // Keep most of the mesh gathered around the visual center instead of filling every edge.
+  // Keep a healthy amount of mesh near the middle, but start with it spread wider so the screen feels alive immediately.
   homeMeshNodes=Array.from({length:count},(_,i)=>{
-    const centered=Math.random()<.82;
-    const rx=centered?(Math.random()+Math.random())/2:Math.random();
-    const ry=centered?(Math.random()+Math.random())/2:Math.random();
+    const clustered=Math.random()<.58;
+    const rx=clustered ? (0.10 + ((Math.random()+Math.random())/2)*0.80) : Math.random();
+    const ry=clustered ? (0.08 + ((Math.random()+Math.random())/2)*0.82) : Math.random();
     return {
       x:rx*rect.width,
-      y:(centered ? (.12 + ry*.68) : ry)*rect.height,
+      y:ry*rect.height,
       vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*8,
       r:1.1+Math.random()*1.95,phase:Math.random()*Math.PI*2,
       hot:i%8===0
@@ -1205,4 +1205,4 @@ window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMesh
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.6', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.7', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

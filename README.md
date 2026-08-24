@@ -1,6 +1,6 @@
-# MeshDoctor v1.5.6
+# MeshDoctor v1.5.7
 
-## What’s new in v1.5.6
+## What’s new in v1.5.7
 - The **ⓘ About** button is relocated to the upper-right corner of the splash screen.
 - The ambient mesh has more line/node volume again, while staying concentrated around the middle of the display.
 - Cyan / purple bloom is reduced further so the live camera background remains easier to see.
@@ -36,14 +36,14 @@ OPENAI_IMAGE_QUALITY=low
 For a separate frontend such as GitHub Pages, deploy the API separately, set `MESHDOCTOR_ALLOWED_ORIGIN` on the API host, then change `config.js` to the full HTTPS `/api/ai-correct` endpoint.
 
 ## Cache/version
-PWA cache key: `meshdoctor-v1.5.6`.
+PWA cache key: `meshdoctor-v1.5.7`.
 
 
-## v1.5.6 note
+## v1.5.7 note
 
 - Repositioned the ℹ️ button so it sits cleanly in the top-right corner on the splash screen.
 
 
-## v1.5.6 note
+## v1.5.7 note
 
 - Replaced the diagonal neon line treatment inside the buttons with a polygon-style background effect so you can preview that direction.
