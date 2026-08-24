@@ -82,7 +82,7 @@ function stopHomeCameraBg(){
 function initAmbientShards(){
   const field=$('homeShardField');
   if(!field || field.childElementCount) return;
-  const count=20;
+  const count=26;
   for(let i=0;i<count;i++){
     const s=document.createElement('span');
     s.className='ambient-shard';
@@ -108,13 +108,20 @@ function resizeHomeMesh(){
   homeMeshCanvas.width=w;homeMeshCanvas.height=h;
   homeMeshCtx=homeMeshCanvas.getContext('2d');
   homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
-  const count=clamp(Math.round(rect.width*rect.height/13500),34,68);
-  homeMeshNodes=Array.from({length:count},(_,i)=>({
-    x:Math.random()*rect.width,y:Math.random()*rect.height,
-    vx:(Math.random()-.5)*12,vy:(Math.random()-.5)*10,
-    r:1.15+Math.random()*2.15,phase:Math.random()*Math.PI*2,
-    hot:i%7===0
-  }));
+  const count=clamp(Math.round(rect.width*rect.height/15000),32,60);
+  // Keep most of the mesh gathered around the visual center instead of filling every edge.
+  homeMeshNodes=Array.from({length:count},(_,i)=>{
+    const centered=Math.random()<.72;
+    const rx=centered?(Math.random()+Math.random())/2:Math.random();
+    const ry=centered?(Math.random()+Math.random())/2:Math.random();
+    return {
+      x:rx*rect.width,
+      y:(centered ? (.12 + ry*.68) : ry)*rect.height,
+      vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*8,
+      r:1.1+Math.random()*1.95,phase:Math.random()*Math.PI*2,
+      hot:i%8===0
+    };
+  });
 }
 
 function drawHomeMesh(ts=0){
@@ -131,15 +138,19 @@ function drawHomeMesh(ts=0){
     if(n.x<-12){n.x=w+12}else if(n.x>w+12){n.x=-12}
     if(n.y<-12){n.y=h+12}else if(n.y>h+12){n.y=-12}
   }
-  const maxDist=Math.min(176,Math.max(122,w*.24));
-  const cx=w*.5,cy=h*.42,maxR=Math.hypot(w*.58,h*.58);
-  const strengthAt=(x,y)=>{const r=Math.hypot(x-cx,y-cy)/Math.max(1,maxR);return .20+.98*Math.pow(clamp(1-r,0,1),1.55);};
-  ctx.lineWidth=.88;
+  const maxDist=Math.min(166,Math.max(118,w*.23));
+  const cx=w*.5,cy=h*.44,maxR=Math.hypot(w*.47,h*.44);
+  const strengthAt=(x,y)=>{
+    const r=Math.hypot(x-cx,y-cy)/Math.max(1,maxR);
+    // Strongest around the middle, with the outside falling away quickly.
+    return .045+1.00*Math.pow(clamp(1-r,0,1),2.05);
+  };
+  ctx.lineWidth=.82;
   for(let i=0;i<homeMeshNodes.length;i++)for(let j=i+1;j<homeMeshNodes.length;j++){
     const a=homeMeshNodes[i],b=homeMeshNodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
     if(d>maxDist)continue;
     const midStrength=strengthAt((a.x+b.x)/2,(a.y+b.y)/2);
-    const alpha=(1-d/maxDist)*.46*midStrength;
+    const alpha=(1-d/maxDist)*.43*midStrength;
     const hotLine=(a.hot||b.hot)&&midStrength>.52;
     ctx.strokeStyle=hotLine?`rgba(164,89,255,${alpha*.9})`:`rgba(53,207,255,${alpha})`;
     ctx.shadowBlur=midStrength>.7?5:0;ctx.shadowColor=hotLine?'rgba(255,79,227,.42)':'rgba(53,207,255,.40)';
@@ -1193,4 +1204,4 @@ window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMesh
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.1', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

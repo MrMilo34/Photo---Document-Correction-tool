@@ -1,6 +1,10 @@
-# MeshDoctor v1.5.0
+# MeshDoctor v1.5.1
 
-## What’s new in v1.5
+## What’s new in v1.5.1
+- Home mesh coverage is pulled back slightly and concentrated more strongly around the middle of the screen.
+- The broad cyan / purple background bloom is substantially smaller and slightly softer.
+- Ambient polygon particles are increased from 20 to 26.
+- Back controls now use centered SVG arrow icons for consistent optical alignment.
 - **PDF From Images** builder added to the splash screen.
 - Add multiple images, tap a page for **Edit / Remove**, and drag the centered **↔** handle to reorder pages.
 - **Edit** routes the selected PDF page through the existing mesh correction screen and the polish / AI Assisted screen.
@@ -31,4 +35,4 @@ OPENAI_IMAGE_QUALITY=low
 For a separate frontend such as GitHub Pages, deploy the API separately, set `MESHDOCTOR_ALLOWED_ORIGIN` on the API host, then change `config.js` to the full HTTPS `/api/ai-correct` endpoint.
 
 ## Cache/version
-PWA cache key: `meshdoctor-v1.5.0`.
+PWA cache key: `meshdoctor-v1.5.1`.

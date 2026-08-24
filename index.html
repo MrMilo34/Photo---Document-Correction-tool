@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.5" />
-  <link rel="icon" href="icons/icon-192.png?v=1.5" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5" />
-  <link rel="stylesheet" href="styles.css?v=1.5" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.5.1" />
+  <link rel="icon" href="icons/icon-192.png?v=1.5.1" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.1" />
+  <link rel="stylesheet" href="styles.css?v=1.5.1" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -22,7 +22,7 @@
   </div>
 
   <header class="topbar">
-    <button id="headerBackBtn" class="header-back neon-icon-btn" aria-label="Back to editing">←</button>
+    <button id="headerBackBtn" class="header-back neon-icon-btn" aria-label="Back to editing"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <div class="export-heading">
       <div class="brand">MeshDoctor</div>
       <div class="sub">Polish &amp; export</div>
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeAboutBtn" class="home-about neon-icon-btn" aria-label="About MeshDoctor">ⓘ</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.5" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.5.1" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.5</div>
+      <div class="version-tag">release v1.5.1</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -52,7 +52,7 @@
     <section id="pdfView" class="view pdf-view">
       <div class="pdf-shell glass-panel">
         <div class="pdf-head">
-          <button id="pdfBackBtn" class="neon-icon-btn" aria-label="Back to home">←</button>
+          <button id="pdfBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <div class="pdf-title">
             <strong>PDF From Images</strong>
             <span>Drag ↔ to reorder pages</span>
@@ -72,7 +72,7 @@
     </section>
 
     <section id="shapeView" class="view">
-      <button id="shapeBackBtn" class="shape-back neon-icon-btn shape-ui" aria-label="Back">←</button>
+      <button id="shapeBackBtn" class="shape-back neon-icon-btn shape-ui" aria-label="Back"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div id="stageWrap" class="stage-wrap">
         <div id="canvasPan" class="canvas-pan"><div id="canvasZoom" class="canvas-zoom"><canvas id="editCanvas"></canvas></div></div>
         <div id="loupe" class="loupe hidden"><canvas id="loupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
@@ -158,18 +158,18 @@
   </main>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.5</h2>
+    <h2>MeshDoctor v1.5.1</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>PDF From Images</strong> lets you add images, drag them into page order, edit any page through MeshDoctor, and save the finished sequence as a PDF.</p>
-    <p><strong>v1.5:</strong> adds PDF assembly, stronger full-screen neon mesh effects, compact themed controls, improved navigation, and clearer AI wording.</p>
+    <p><strong>v1.5.1:</strong> refines the home mesh toward the center, reduces the broad color bloom, adds more polygon particles, and precisely centers all Back icons.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.5"></script>
-  <script src="app.js?v=1.5"></script>
+  <script src="config.js?v=1.5.1"></script>
+  <script src="app.js?v=1.5.1"></script>
 </body>
 </html>
