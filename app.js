@@ -82,11 +82,11 @@ function stopHomeCameraBg(){
 function initAmbientShards(){
   const field=$('homeShardField');
   if(!field || field.childElementCount) return;
-  const count=26;
+  const count=34;
   for(let i=0;i<count;i++){
     const s=document.createElement('span');
     s.className='ambient-shard';
-    const size=5+Math.random()*8;
+    const size=6+Math.random()*10;
     s.style.width=s.style.height=`${size}px`;
     s.style.left=`${3+Math.random()*94}%`;
     s.style.top=`${5+Math.random()*90}%`;
@@ -108,7 +108,7 @@ function resizeHomeMesh(){
   homeMeshCanvas.width=w;homeMeshCanvas.height=h;
   homeMeshCtx=homeMeshCanvas.getContext('2d');
   homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
-  const count=clamp(Math.round(rect.width*rect.height/12250),40,72);
+  const count=clamp(Math.round(rect.width*rect.height/11000),48,84);
   // Keep most of the mesh gathered around the visual center instead of filling every edge.
   homeMeshNodes=Array.from({length:count},(_,i)=>{
     const centered=Math.random()<.82;
@@ -143,14 +143,14 @@ function drawHomeMesh(ts=0){
   const strengthAt=(x,y)=>{
     const r=Math.hypot(x-cx,y-cy)/Math.max(1,maxR);
     // Strongest around the middle, with the outside falling away quickly.
-    return .06+1.08*Math.pow(clamp(1-r,0,1),1.95);
+    return .09+1.22*Math.pow(clamp(1-r,0,1),1.82);
   };
-  ctx.lineWidth=.82;
+  ctx.lineWidth=1.02;
   for(let i=0;i<homeMeshNodes.length;i++)for(let j=i+1;j<homeMeshNodes.length;j++){
     const a=homeMeshNodes[i],b=homeMeshNodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
     if(d>maxDist)continue;
     const midStrength=strengthAt((a.x+b.x)/2,(a.y+b.y)/2);
-    const alpha=(1-d/maxDist)*.46*midStrength;
+    const alpha=(1-d/maxDist)*.62*midStrength;
     const hotLine=(a.hot||b.hot)&&midStrength>.52;
     ctx.strokeStyle=hotLine?`rgba(164,89,255,${alpha*.9})`:`rgba(53,207,255,${alpha})`;
     ctx.shadowBlur=midStrength>.7?5:0;ctx.shadowColor=hotLine?'rgba(255,79,227,.42)':'rgba(53,207,255,.40)';
@@ -159,7 +159,7 @@ function drawHomeMesh(ts=0){
   for(const n of homeMeshNodes){
     const pulse=.72+.28*Math.sin(ts*.0013+n.phase),strength=strengthAt(n.x,n.y);
     ctx.shadowBlur=(n.hot?18:11)*strength;ctx.shadowColor=n.hot?'rgba(255,79,227,.95)':'rgba(53,207,255,.88)';
-    const alpha=(n.hot?(.58+.28*pulse):(.50+.28*pulse))*strength;
+    const alpha=(n.hot?(.68+.26*pulse):(.60+.26*pulse))*strength;
     ctx.fillStyle=n.hot?`rgba(255,79,227,${alpha})`:`rgba(105,135,255,${alpha})`;
     ctx.beginPath();ctx.arc(n.x,n.y,n.r*pulse*(.85+.35*strength),0,Math.PI*2);ctx.fill();
   }
@@ -1198,10 +1198,11 @@ document.querySelectorAll('.ai-choice').forEach(btn=>btn.addEventListener('click
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
 $('savePngBtn').addEventListener('click',()=>pdfEditingId?savePdfEditedPage():downloadCanvas('image/png'));
 $('shareBtn').addEventListener('click',shareCanvas);
-$('homeAboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());
-$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
+const homeAboutBtn=$('homeAboutBtn'), aboutDialog=$('aboutDialog'), closeAboutBtn=$('closeAboutBtn');
+if(homeAboutBtn&&aboutDialog) homeAboutBtn.addEventListener('click',()=>aboutDialog.showModal());
+if(closeAboutBtn&&aboutDialog) closeAboutBtn.addEventListener('click',()=>aboutDialog.close());
 window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.4', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.5', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
