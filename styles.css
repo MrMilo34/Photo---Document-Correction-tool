@@ -95,7 +95,7 @@ body.ambient-mode .ambient-backdrop{opacity:1;visibility:visible}
 main,.topbar{position:relative;z-index:5}
 
 .home-view{padding:calc(18px + env(safe-area-inset-top)) 16px calc(22px + env(safe-area-inset-bottom));gap:10px;justify-content:center}
-.home-about{position:fixed;right:16px;top:calc(12px + env(safe-area-inset-top));z-index:32}
+.home-about{position:fixed;top:calc(12px + env(safe-area-inset-top));right:16px;left:auto!important;bottom:auto;z-index:40;transform:none}
 .splash-card{padding:12px 12px 9px;background:rgba(7,11,18,.66);border:1px solid rgba(72,101,132,.38);box-shadow:0 20px 54px rgba(0,0,0,.32),0 0 44px rgba(53,207,255,.09);backdrop-filter:blur(12px)}
 .home-splash{box-shadow:0 18px 42px rgba(0,0,0,.34),0 0 38px rgba(53,207,255,.10)}
 .version-tag{font-size:11px;margin-top:0}

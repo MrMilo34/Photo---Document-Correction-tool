@@ -1,6 +1,6 @@
 {
   "name": "meshdoctor",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "private": true,
   "type": "module",
   "description": "MeshDoctor photo and document correction PWA with AI-assisted restoration and PDF-from-images support."
