@@ -108,10 +108,10 @@ function resizeHomeMesh(){
   homeMeshCanvas.width=w;homeMeshCanvas.height=h;
   homeMeshCtx=homeMeshCanvas.getContext('2d');
   homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
-  const count=clamp(Math.round(rect.width*rect.height/15000),32,60);
+  const count=clamp(Math.round(rect.width*rect.height/12250),40,72);
   // Keep most of the mesh gathered around the visual center instead of filling every edge.
   homeMeshNodes=Array.from({length:count},(_,i)=>{
-    const centered=Math.random()<.72;
+    const centered=Math.random()<.82;
     const rx=centered?(Math.random()+Math.random())/2:Math.random();
     const ry=centered?(Math.random()+Math.random())/2:Math.random();
     return {
@@ -138,19 +138,19 @@ function drawHomeMesh(ts=0){
     if(n.x<-12){n.x=w+12}else if(n.x>w+12){n.x=-12}
     if(n.y<-12){n.y=h+12}else if(n.y>h+12){n.y=-12}
   }
-  const maxDist=Math.min(166,Math.max(118,w*.23));
+  const maxDist=Math.min(176,Math.max(126,w*.245));
   const cx=w*.5,cy=h*.44,maxR=Math.hypot(w*.47,h*.44);
   const strengthAt=(x,y)=>{
     const r=Math.hypot(x-cx,y-cy)/Math.max(1,maxR);
     // Strongest around the middle, with the outside falling away quickly.
-    return .045+1.00*Math.pow(clamp(1-r,0,1),2.05);
+    return .06+1.08*Math.pow(clamp(1-r,0,1),1.95);
   };
   ctx.lineWidth=.82;
   for(let i=0;i<homeMeshNodes.length;i++)for(let j=i+1;j<homeMeshNodes.length;j++){
     const a=homeMeshNodes[i],b=homeMeshNodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
     if(d>maxDist)continue;
     const midStrength=strengthAt((a.x+b.x)/2,(a.y+b.y)/2);
-    const alpha=(1-d/maxDist)*.43*midStrength;
+    const alpha=(1-d/maxDist)*.46*midStrength;
     const hotLine=(a.hot||b.hot)&&midStrength>.52;
     ctx.strokeStyle=hotLine?`rgba(164,89,255,${alpha*.9})`:`rgba(53,207,255,${alpha})`;
     ctx.shadowBlur=midStrength>.7?5:0;ctx.shadowColor=hotLine?'rgba(255,79,227,.42)':'rgba(53,207,255,.40)';
@@ -1066,7 +1066,7 @@ function renderPdfBuilder(){
     const thumb=document.createElement('div');thumb.className='pdf-thumb';
     const img=document.createElement('img');img.src=item.url;img.alt=`PDF page ${index+1}`;thumb.appendChild(img);
     const pageNo=document.createElement('span');pageNo.className='pdf-page-no';pageNo.textContent=String(index+1);thumb.appendChild(pageNo);
-    const handle=document.createElement('button');handle.type='button';handle.className='pdf-drag-handle';handle.textContent='↔';handle.setAttribute('aria-label',`Move page ${index+1}`);thumb.appendChild(handle);
+    const handle=document.createElement('button');handle.type='button';handle.className='pdf-drag-handle';handle.innerHTML='<svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';handle.setAttribute('aria-label',`Move page ${index+1}`);thumb.appendChild(handle);
     const actions=document.createElement('div');actions.className='pdf-tile-actions';
     const edit=document.createElement('button');edit.type='button';edit.className='pdf-edit-item';edit.textContent='✦ Edit';
     const remove=document.createElement('button');remove.type='button';remove.className='pdf-remove-item';remove.textContent='✕ Remove';
@@ -1204,4 +1204,4 @@ window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMesh
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.1', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.2', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
