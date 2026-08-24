@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const views = { home: $('homeView'), shape: $('shapeView'), result: $('resultView') };
+const views = { home: $('homeView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
 const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
@@ -16,6 +16,12 @@ let homeBgStream = null;
 let homeBgTried = false;
 let homeMeshCtx = null, homeMeshNodes = [], homeMeshRaf = 0, homeMeshLast = 0;
 let aiServiceState = 'unknown';
+let pdfItems = [];
+let pdfSelectedId = null;
+let pdfEditingId = null;
+let pdfUid = 0;
+let pdfDrag = null;
+let pdfSuppressClickUntil = 0;
 
 let points = [];
 let draggedIndex = -1;
@@ -76,14 +82,14 @@ function stopHomeCameraBg(){
 function initAmbientShards(){
   const field=$('homeShardField');
   if(!field || field.childElementCount) return;
-  const count=12;
+  const count=20;
   for(let i=0;i<count;i++){
     const s=document.createElement('span');
     s.className='ambient-shard';
     const size=5+Math.random()*8;
     s.style.width=s.style.height=`${size}px`;
-    s.style.left=`${8+Math.random()*84}%`;
-    s.style.top=`${18+Math.random()*72}%`;
+    s.style.left=`${3+Math.random()*94}%`;
+    s.style.top=`${5+Math.random()*90}%`;
     s.style.setProperty('--dur',`${3.2+Math.random()*3.8}s`);
     s.style.setProperty('--delay',`${-Math.random()*5}s`);
     s.style.setProperty('--drift',`${-26+Math.random()*52}px`);
@@ -102,11 +108,11 @@ function resizeHomeMesh(){
   homeMeshCanvas.width=w;homeMeshCanvas.height=h;
   homeMeshCtx=homeMeshCanvas.getContext('2d');
   homeMeshCtx.setTransform(dpr,0,0,dpr,0,0);
-  const count=clamp(Math.round(rect.width*rect.height/17500),18,34);
+  const count=clamp(Math.round(rect.width*rect.height/13500),34,68);
   homeMeshNodes=Array.from({length:count},(_,i)=>({
     x:Math.random()*rect.width,y:Math.random()*rect.height,
-    vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*8,
-    r:1.1+Math.random()*1.8,phase:Math.random()*Math.PI*2,
+    vx:(Math.random()-.5)*12,vy:(Math.random()-.5)*10,
+    r:1.15+Math.random()*2.15,phase:Math.random()*Math.PI*2,
     hot:i%7===0
   }));
 }
@@ -114,7 +120,7 @@ function resizeHomeMesh(){
 function drawHomeMesh(ts=0){
   if(!homeMeshCanvas) return;
   homeMeshRaf=requestAnimationFrame(drawHomeMesh);
-  if(document.hidden||!views.home.classList.contains('active')){homeMeshLast=ts;return;}
+  if(document.hidden||!(views.home.classList.contains('active')||views.pdf.classList.contains('active'))){homeMeshLast=ts;return;}
   resizeHomeMesh();
   const ctx=homeMeshCtx;if(!ctx)return;
   const rect=homeMeshCanvas.getBoundingClientRect(),w=rect.width,h=rect.height;
@@ -125,20 +131,26 @@ function drawHomeMesh(ts=0){
     if(n.x<-12){n.x=w+12}else if(n.x>w+12){n.x=-12}
     if(n.y<-12){n.y=h+12}else if(n.y>h+12){n.y=-12}
   }
-  const maxDist=Math.min(142,Math.max(104,w*.22));
-  ctx.lineWidth=.75;
+  const maxDist=Math.min(176,Math.max(122,w*.24));
+  const cx=w*.5,cy=h*.42,maxR=Math.hypot(w*.58,h*.58);
+  const strengthAt=(x,y)=>{const r=Math.hypot(x-cx,y-cy)/Math.max(1,maxR);return .20+.98*Math.pow(clamp(1-r,0,1),1.55);};
+  ctx.lineWidth=.88;
   for(let i=0;i<homeMeshNodes.length;i++)for(let j=i+1;j<homeMeshNodes.length;j++){
     const a=homeMeshNodes[i],b=homeMeshNodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
     if(d>maxDist)continue;
-    const alpha=(1-d/maxDist)*.28;
-    ctx.strokeStyle=`rgba(53,207,255,${alpha})`;
+    const midStrength=strengthAt((a.x+b.x)/2,(a.y+b.y)/2);
+    const alpha=(1-d/maxDist)*.46*midStrength;
+    const hotLine=(a.hot||b.hot)&&midStrength>.52;
+    ctx.strokeStyle=hotLine?`rgba(164,89,255,${alpha*.9})`:`rgba(53,207,255,${alpha})`;
+    ctx.shadowBlur=midStrength>.7?5:0;ctx.shadowColor=hotLine?'rgba(255,79,227,.42)':'rgba(53,207,255,.40)';
     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
   }
   for(const n of homeMeshNodes){
-    const pulse=.72+.28*Math.sin(ts*.0013+n.phase);
-    ctx.shadowBlur=n.hot?12:7;ctx.shadowColor=n.hot?'rgba(255,79,227,.9)':'rgba(53,207,255,.8)';
-    ctx.fillStyle=n.hot?`rgba(255,79,227,${.60+.25*pulse})`:`rgba(105,135,255,${.50+.30*pulse})`;
-    ctx.beginPath();ctx.arc(n.x,n.y,n.r*pulse,0,Math.PI*2);ctx.fill();
+    const pulse=.72+.28*Math.sin(ts*.0013+n.phase),strength=strengthAt(n.x,n.y);
+    ctx.shadowBlur=(n.hot?18:11)*strength;ctx.shadowColor=n.hot?'rgba(255,79,227,.95)':'rgba(53,207,255,.88)';
+    const alpha=(n.hot?(.58+.28*pulse):(.50+.28*pulse))*strength;
+    ctx.fillStyle=n.hot?`rgba(255,79,227,${alpha})`:`rgba(105,135,255,${alpha})`;
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r*pulse*(.85+.35*strength),0,Math.PI*2);ctx.fill();
   }
   ctx.shadowBlur=0;
 }
@@ -153,17 +165,23 @@ function showView(name){
   Object.values(views).forEach(v=>v.classList.remove('active'));
   views[name].classList.add('active');
   document.body.classList.toggle('result-mode', name==='result');
+  document.body.classList.toggle('home-mode', name==='home');
+  document.body.classList.toggle('pdf-mode', name==='pdf');
+  document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf');
   if(name!=='shape') hidePointActions();
-  if(name==='home') startHomeCameraBg();
+  if(name==='home'||name==='pdf') startHomeCameraBg();
   else stopHomeCameraBg();
+  if(name==='result') updateResultActions();
+  if(name==='pdf') renderPdfBuilder();
   window.scrollTo(0,0);
 }
 function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2200); }
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
-async function loadFile(file){
+async function loadFile(file, options={}){
   if(!file) return;
+  pdfEditingId = options.pdfItemId || null;
   currentFileBase = (file.name || 'image').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'image';
   busy(true,'Loading photo…');
   try{
@@ -864,10 +882,10 @@ async function checkAiService(force=false){
     const res=await fetch(AI_ENDPOINT,{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
     if(!res.ok)throw new Error(`AI endpoint ${res.status}`);
     const data=await res.json();
-    if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} · ${data.quality||'low'} ready`);}
+    if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`AI Image · ${data.quality||'low'} ready`);}
     else{aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI key not configured');}
   }catch(err){
-    aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · GPT endpoint unavailable');
+    aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI endpoint unavailable');
   }
   return aiServiceState;
 }
@@ -898,7 +916,7 @@ async function gptRestoreImage(img,mode){
     const res=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
     let data={};try{data=await res.json();}catch{}
     if(!res.ok||!data?.image)throw new Error(data?.error||`GPT restore failed (${res.status})`);
-    aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} · ${data.quality||'low'} restore complete`);
+    aiServiceState='ready';setAiEngineStatus('ready',`AI Image · ${data.quality||'low'} restore complete`);
     return await dataUrlToImageData(data.image);
   }finally{clearTimeout(timer);}
 }
@@ -908,17 +926,17 @@ async function runAiRestoreChoice(choice){
   document.querySelectorAll('.ai-choice').forEach(b=>b.classList.toggle('active',b.dataset.aiChoice===choice));
   const resolved=choice==='automatic'?detectRestoreIntent(correctedOriginal):choice;
   $('aiChoiceStatus').textContent=choice==='automatic'?`Automatic selected ${resolved === 'document' ? 'Document' : 'Photo'}.`:`${choice === 'document' ? 'Document' : 'Photo'} restore selected.`;
-  busy(true, resolved==='document'?'GPT cleaning document…':'GPT restoring photo…');
+  busy(true, resolved==='document'?'AI cleaning document…':'AI restoring photo…');
   await new Promise(r=>setTimeout(r,20));
   try{
     const state=await checkAiService();
     if(state==='ready'){
       try{
         aiAssistImage=await gptRestoreImage(correctedOriginal,resolved);
-        $('aiChoiceStatus').textContent=`GPT ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
+        $('aiChoiceStatus').textContent=`AI ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
       }catch(err){
         console.warn('GPT restore unavailable, using local fallback',err);
-        aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · GPT request failed');
+        aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI request failed');
         aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
         $('aiChoiceStatus').textContent=`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
       }
@@ -969,6 +987,165 @@ function rotateSource(){
   sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=autoDetectDocument();history=[];selectedIndex=-1;hidePointActions();resetViewport();renderEditor();
 }
 
+
+function updateResultActions(){
+  const save=$('savePngBtn');
+  if(!save)return;
+  save.textContent=pdfEditingId?'Save & Continue':'Save PNG';
+  save.setAttribute('aria-label',pdfEditingId?'Save edited page and return to PDF builder':'Save PNG');
+}
+
+function pdfItemById(id){ return pdfItems.find(x=>x.id===id); }
+function makePdfItem(file){
+  return {id:`PDF-${Date.now().toString(36)}-${(++pdfUid).toString(36)}`,name:file.name||`Page-${pdfUid}.jpg`,blob:file,url:URL.createObjectURL(file)};
+}
+function revokePdfItem(item){ if(item?.url)try{URL.revokeObjectURL(item.url);}catch{} }
+function movePdfItem(from,to){
+  if(from===to||from<0||to<0||from>=pdfItems.length||to>=pdfItems.length)return;
+  const [item]=pdfItems.splice(from,1);pdfItems.splice(to,0,item);
+}
+function clearPdfDropTargets(){ document.querySelectorAll('.pdf-item.drop-target').forEach(el=>el.classList.remove('drop-target')); }
+
+function bindPdfDrag(handle,tile,itemId){
+  handle.addEventListener('click',e=>e.stopPropagation());
+  handle.addEventListener('pointerdown',ev=>{
+    if(ev.button!=null&&ev.button!==0)return;
+    const from=pdfItems.findIndex(x=>x.id===itemId);
+    if(from<0)return;
+    pdfDrag={itemId,from,targetId:itemId,startX:ev.clientX,startY:ev.clientY,moved:false,pointerId:ev.pointerId};
+    tile.classList.add('dragging');
+    try{handle.setPointerCapture(ev.pointerId);}catch{}
+    ev.preventDefault();ev.stopPropagation();
+  });
+  handle.addEventListener('pointermove',ev=>{
+    if(!pdfDrag||pdfDrag.pointerId!==ev.pointerId)return;
+    if(Math.hypot(ev.clientX-pdfDrag.startX,ev.clientY-pdfDrag.startY)>5)pdfDrag.moved=true;
+    if(!pdfDrag.moved)return;
+    const target=document.elementFromPoint(ev.clientX,ev.clientY)?.closest?.('.pdf-item');
+    clearPdfDropTargets();
+    if(target&&target.dataset.id!==itemId){target.classList.add('drop-target');pdfDrag.targetId=target.dataset.id;}
+    else pdfDrag.targetId=itemId;
+    ev.preventDefault();
+  });
+  const end=ev=>{
+    if(!pdfDrag||pdfDrag.pointerId!==ev.pointerId)return;
+    const drag=pdfDrag;pdfDrag=null;
+    try{handle.releasePointerCapture(ev.pointerId);}catch{}
+    clearPdfDropTargets();tile.classList.remove('dragging');
+    if(drag.moved){
+      const to=pdfItems.findIndex(x=>x.id===drag.targetId);
+      if(to>=0&&to!==drag.from)movePdfItem(drag.from,to);
+      pdfSuppressClickUntil=Date.now()+320;
+      renderPdfBuilder();
+    }
+    ev.preventDefault();ev.stopPropagation();
+  };
+  handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+}
+
+function renderPdfBuilder(){
+  const list=$('pdfImageList'),empty=$('pdfEmpty');
+  if(!list||!empty)return;
+  list.innerHTML='';
+  empty.classList.toggle('hidden',pdfItems.length>0);
+  list.classList.toggle('hidden',pdfItems.length===0);
+  if(pdfSelectedId&&!pdfItemById(pdfSelectedId))pdfSelectedId=null;
+  pdfItems.forEach((item,index)=>{
+    const tile=document.createElement('div');tile.className='pdf-item'+(pdfSelectedId===item.id?' selected':'');tile.dataset.id=item.id;
+    const thumb=document.createElement('div');thumb.className='pdf-thumb';
+    const img=document.createElement('img');img.src=item.url;img.alt=`PDF page ${index+1}`;thumb.appendChild(img);
+    const pageNo=document.createElement('span');pageNo.className='pdf-page-no';pageNo.textContent=String(index+1);thumb.appendChild(pageNo);
+    const handle=document.createElement('button');handle.type='button';handle.className='pdf-drag-handle';handle.textContent='↔';handle.setAttribute('aria-label',`Move page ${index+1}`);thumb.appendChild(handle);
+    const actions=document.createElement('div');actions.className='pdf-tile-actions';
+    const edit=document.createElement('button');edit.type='button';edit.className='pdf-edit-item';edit.textContent='✦ Edit';
+    const remove=document.createElement('button');remove.type='button';remove.className='pdf-remove-item';remove.textContent='✕ Remove';
+    actions.append(edit,remove);thumb.appendChild(actions);tile.appendChild(thumb);
+    const name=document.createElement('div');name.className='pdf-name';name.textContent=item.name;tile.appendChild(name);
+    tile.addEventListener('click',()=>{if(Date.now()<pdfSuppressClickUntil)return;pdfSelectedId=pdfSelectedId===item.id?null:item.id;renderPdfBuilder();});
+    edit.addEventListener('click',ev=>{ev.stopPropagation();editPdfItem(item.id);});
+    remove.addEventListener('click',ev=>{ev.stopPropagation();removePdfItem(item.id);});
+    bindPdfDrag(handle,tile,item.id);list.appendChild(tile);
+  });
+  $('savePdfBtn').disabled=pdfItems.length===0;
+}
+
+function addPdfImages(files){
+  const images=[...files].filter(f=>f.type?.startsWith('image/'));
+  if(!images.length){toast('Choose one or more images.');return;}
+  pdfItems.push(...images.map(makePdfItem));
+  pdfSelectedId=null;renderPdfBuilder();
+}
+function removePdfItem(id){
+  const i=pdfItems.findIndex(x=>x.id===id);if(i<0)return;
+  revokePdfItem(pdfItems[i]);pdfItems.splice(i,1);if(pdfSelectedId===id)pdfSelectedId=null;renderPdfBuilder();
+}
+async function editPdfItem(id){
+  const item=pdfItemById(id);if(!item)return;
+  pdfSelectedId=null;
+  const file=new File([item.blob],item.name,{type:item.blob.type||'image/png'});
+  await loadFile(file,{pdfItemId:id});
+}
+function canvasBlob(canvas,type='image/png',quality){
+  return new Promise(resolve=>canvas.toBlob(resolve,type,quality));
+}
+async function savePdfEditedPage(){
+  const item=pdfItemById(pdfEditingId);if(!item){pdfEditingId=null;showView('pdf');return;}
+  busy(true,'Saving page…');
+  try{
+    const blob=await canvasBlob(resultCanvas,'image/png');
+    if(!blob)throw new Error('Canvas export failed');
+    revokePdfItem(item);item.blob=blob;item.url=URL.createObjectURL(blob);
+    item.name=(item.name||'page').replace(/\.[^.]+$/,'')+'-edited.png';
+    pdfEditingId=null;pdfSelectedId=null;showView('pdf');toast('PDF page updated.');
+  }catch(err){console.error(err);toast('Could not save that edited page.');}
+  finally{busy(false);}
+}
+
+async function pdfPageImage(item){
+  const bmp=await createImageBitmap(item.blob);
+  const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(bmp.width,bmp.height));
+  const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));
+  const c=document.createElement('canvas');c.width=w;c.height=h;const cx=c.getContext('2d');
+  cx.fillStyle='#fff';cx.fillRect(0,0,w,h);cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';cx.drawImage(bmp,0,0,w,h);bmp.close?.();
+  const blob=await canvasBlob(c,'image/jpeg',.92);if(!blob)throw new Error('JPEG conversion failed');
+  return {bytes:new Uint8Array(await blob.arrayBuffer()),width:w,height:h};
+}
+function asciiBytes(text){return new TextEncoder().encode(text);}
+function joinBytes(parts){let len=0;parts.forEach(p=>len+=p.length);const out=new Uint8Array(len);let o=0;parts.forEach(p=>{out.set(p,o);o+=p.length;});return out;}
+function pdfStreamObject(id,dict,streamBytes){return joinBytes([asciiBytes(`${id} 0 obj\n<< ${dict} /Length ${streamBytes.length} >>\nstream\n`),streamBytes,asciiBytes(`\nendstream\nendobj\n`)]);}
+function buildImagePdf(pages){
+  const count=pages.length,maxId=2+count*3,objs=new Array(maxId+1);
+  const kids=[];
+  for(let i=0;i<count;i++)kids.push(`${3+i*3} 0 R`);
+  objs[1]=asciiBytes(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`);
+  objs[2]=asciiBytes(`2 0 obj\n<< /Type /Pages /Count ${count} /Kids [${kids.join(' ')}] >>\nendobj\n`);
+  const PW=612,PH=792,M=18;
+  pages.forEach((page,i)=>{
+    const pageId=3+i*3,contentId=4+i*3,imageId=5+i*3;
+    const scale=Math.min((PW-M*2)/page.width,(PH-M*2)/page.height),dw=page.width*scale,dh=page.height*scale,x=(PW-dw)/2,y=(PH-dh)/2;
+    const content=asciiBytes(`q\n${dw.toFixed(3)} 0 0 ${dh.toFixed(3)} ${x.toFixed(3)} ${y.toFixed(3)} cm\n/Im0 Do\nQ\n`);
+    objs[pageId]=asciiBytes(`${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`);
+    objs[contentId]=pdfStreamObject(contentId,'',content);
+    objs[imageId]=pdfStreamObject(imageId,`/Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,page.bytes);
+  });
+  const header=asciiBytes('%PDF-1.4\n%MeshDoctor\n');let total=header.length;const offsets=new Array(maxId+1).fill(0),parts=[header];
+  for(let id=1;id<=maxId;id++){offsets[id]=total;parts.push(objs[id]);total+=objs[id].length;}
+  const xrefStart=total;let xref=`xref\n0 ${maxId+1}\n0000000000 65535 f \n`;
+  for(let id=1;id<=maxId;id++)xref+=`${String(offsets[id]).padStart(10,'0')} 00000 n \n`;
+  xref+=`trailer\n<< /Size ${maxId+1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  parts.push(asciiBytes(xref));return new Blob(parts,{type:'application/pdf'});
+}
+async function savePdf(){
+  if(!pdfItems.length){toast('Add images first.');return;}
+  busy(true,`Building PDF · 1/${pdfItems.length}`);
+  try{
+    const pages=[];
+    for(let i=0;i<pdfItems.length;i++){$('busyText').textContent=`Building PDF · ${i+1}/${pdfItems.length}`;pages.push(await pdfPageImage(pdfItems[i]));await new Promise(r=>setTimeout(r,0));}
+    const pdf=buildImagePdf(pages),url=URL.createObjectURL(pdf),a=document.createElement('a');a.href=url;a.download='MeshDoctor-images.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);toast('PDF saved to your downloads.');
+  }catch(err){console.error(err);toast('Could not build the PDF.');}
+  finally{busy(false);}
+}
+
 function downloadCanvas(type='image/png'){
   resultCanvas.toBlob(blob=>{if(!blob)return;const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${currentFileBase}-corrected.${type==='image/png'?'png':'jpg'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Saved to your downloads.');},type,type==='image/jpeg'?.94:undefined);
 }
@@ -976,13 +1153,21 @@ async function shareCanvas(){
   resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
 }
 
-$('cameraInput').addEventListener('change',e=>loadFile(e.target.files[0]));$('galleryInput').addEventListener('change',e=>loadFile(e.target.files[0]));
+$('cameraInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+$('galleryInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+$('pdfBuilderBtn').addEventListener('click',()=>{pdfEditingId=null;showView('pdf');});
+$('pdfBackBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
+$('pdfAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
+$('pdfEmptyAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
+$('pdfImageInput').addEventListener('change',e=>{addPdfImages(e.target.files);e.target.value='';});
+$('savePdfBtn').addEventListener('pointerdown',burstCorrectButton);
+$('savePdfBtn').addEventListener('click',savePdf);
 $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Image boundary re-detected.');});
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());
-function burstCorrectButton(){
-  const btn=$('correctBtn'),r=btn.getBoundingClientRect();
+function burstCorrectButton(ev){
+  const btn=ev?.currentTarget||$('correctBtn'),r=btn.getBoundingClientRect();
   for(let i=0;i<8;i++){
     const s=document.createElement('span');s.className='correct-shard';
     s.style.left=`${r.left+r.width*(.16+Math.random()*.68)}px`;s.style.top=`${r.top+r.height*(.28+Math.random()*.44)}px`;
@@ -991,17 +1176,21 @@ function burstCorrectButton(){
   }
 }
 $('correctBtn').addEventListener('pointerdown',burstCorrectButton);$('correctBtn').addEventListener('click',runCorrection);
+$('shapeBackBtn').addEventListener('click',()=>{if(pdfEditingId){pdfEditingId=null;showView('pdf');}else showView('home');});
 $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
+$('resultHomeBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
 $('correctedModeBtn').addEventListener('click',()=>setMode('corrected'));
 $('aiAssistModeBtn').addEventListener('click',openAiAssist);
 document.querySelectorAll('.ai-choice').forEach(btn=>btn.addEventListener('click',()=>runAiRestoreChoice(btn.dataset.aiChoice)));
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
-$('savePngBtn').addEventListener('click',()=>downloadCanvas('image/png'));$('shareBtn').addEventListener('click',shareCanvas);
-$('aboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
-window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMeshSliders();if(views.home.classList.contains('active')) startHomeCameraBg(); });
+$('savePngBtn').addEventListener('click',()=>pdfEditingId?savePdfEditedPage():downloadCanvas('image/png'));
+$('shareBtn').addEventListener('click',shareCanvas);
+$('homeAboutBtn').addEventListener('click',()=>$('aboutDialog').showModal());
+$('closeAboutBtn').addEventListener('click',()=>$('aboutDialog').close());
+window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
-document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')) startHomeCameraBg(); });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.4', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

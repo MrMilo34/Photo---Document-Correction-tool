@@ -80,3 +80,79 @@ dialog{border:1px solid #364352;border-radius:20px;background:#141a21;color:#f7f
 @media(min-width:800px){#editCanvas{max-width:min(100vw,1100px);max-height:100dvh}.result-stage{min-height:64vh}.result-stage canvas{max-height:68vh}.toolbar,.result-actions,.mode-row,.bottom-action,.adjust-panel,.assist-panel{max-width:900px}.toolbar,.bottom-action{margin-left:auto;margin-right:auto}.bottom-action{left:max(12px,calc((100vw - 900px)/2));right:max(12px,calc((100vw - 900px)/2))}.adjust-panel,.assist-panel{width:calc(100% - 20px);margin-left:auto;margin-right:auto}}
 
 @media(max-width:390px){.seg{font-size:10.5px;padding:9px 4px}.seg.ai-seg{font-size:10px}}
+
+/* ===== MeshDoctor v1.5 UI / PDF builder ===== */
+body{overflow-x:hidden}
+.ambient-backdrop{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .22s ease;isolation:isolate}
+body.ambient-mode .ambient-backdrop{opacity:1;visibility:visible}
+.ambient-backdrop .home-camera-bg{position:absolute;inset:0;z-index:0}
+.ambient-backdrop .home-camera-bg video{position:absolute;inset:-8%;width:116%;height:116%;object-fit:cover;filter:blur(18px) saturate(1.08) brightness(.82);transform:scale(1.08)}
+.ambient-backdrop .home-camera-vignette{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 43%,rgba(5,9,17,.06) 0%,rgba(7,11,20,.32) 45%,rgba(4,7,13,.72) 88%,rgba(3,5,9,.82) 100%),linear-gradient(180deg,rgba(5,8,14,.14),rgba(5,8,14,.48))}
+.ambient-backdrop .home-shard-field{position:absolute;inset:0;z-index:3;overflow:hidden}
+.ambient-backdrop .home-mesh-canvas{position:absolute;inset:-8vh -10vw;z-index:2;width:120vw;height:116vh;opacity:1;filter:drop-shadow(0 0 10px rgba(53,207,255,.33)) drop-shadow(0 0 20px rgba(105,135,255,.14))}
+.ambient-backdrop .home-mesh-glow{position:absolute;z-index:1;inset:-10%;pointer-events:none;background:radial-gradient(ellipse at 50% 40%,rgba(53,207,255,.20) 0%,rgba(86,103,255,.13) 24%,rgba(255,79,227,.08) 43%,transparent 70%);filter:blur(18px)}
+main,.topbar{position:relative;z-index:5}
+
+.home-view{padding:calc(18px + env(safe-area-inset-top)) 16px calc(22px + env(safe-area-inset-bottom));gap:10px;justify-content:center}
+.home-about{position:absolute;right:16px;top:calc(12px + env(safe-area-inset-top));z-index:8}
+.splash-card{padding:12px 12px 9px;background:rgba(7,11,18,.66);border:1px solid rgba(72,101,132,.38);box-shadow:0 20px 54px rgba(0,0,0,.32),0 0 44px rgba(53,207,255,.09);backdrop-filter:blur(12px)}
+.home-splash{box-shadow:0 18px 42px rgba(0,0,0,.34),0 0 38px rgba(53,207,255,.10)}
+.version-tag{font-size:11px;margin-top:0}
+.home-actions{gap:9px}
+.big-btn{min-height:52px;border-radius:15px;font-size:16px}
+.neon-action,.mesh-tool,.themed-secondary{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(23,31,44,.93),rgba(12,18,27,.95));border:1px solid rgba(87,217,255,.27);box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 8px 24px rgba(0,0,0,.22),0 0 18px rgba(53,207,255,.035)}
+.neon-action::before,.mesh-tool::before,.themed-secondary::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,transparent 0 28%,rgba(53,207,255,.08) 29% 30%,transparent 31% 61%,rgba(255,79,227,.07) 62% 63%,transparent 64%);opacity:.9}
+.home-actions .primary.neon-action{background:linear-gradient(135deg,#35cfff,#6476ff);border-color:rgba(139,210,255,.75);color:#071017;box-shadow:0 10px 28px rgba(67,125,255,.18),0 0 24px rgba(53,207,255,.10)}
+.pdf-home-btn{color:#edf8ff}
+.neon-icon-btn{height:40px;width:40px;min-width:40px;padding:0;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,rgba(24,33,47,.95),rgba(12,18,28,.96));border:1px solid rgba(87,217,255,.27);box-shadow:0 8px 24px rgba(0,0,0,.28),inset 0 0 16px rgba(53,207,255,.035);color:#eaf8ff;font-size:20px;font-weight:850}
+.header-back.neon-icon-btn{font-size:24px}.icon-btn.neon-icon-btn{font-size:18px}
+
+/* Shape controls now fit four-across on phone screens. */
+.shape-back{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:26;background:rgba(9,15,24,.82);backdrop-filter:blur(12px)}
+.toolbar{left:8px;right:8px;bottom:68px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;overflow:visible;white-space:normal}
+.toolbar button{min-width:0;width:100%;height:44px;padding:8px 4px;border-radius:13px;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;gap:4px;color:#dcebf7;background:linear-gradient(180deg,rgba(21,31,44,.90),rgba(10,17,25,.92));border-color:rgba(83,163,205,.31);box-shadow:0 7px 20px rgba(0,0,0,.25),inset 0 0 18px rgba(53,207,255,.025)}
+.toolbar button span{position:relative;z-index:2;min-width:0}
+.hint{left:10px;right:10px;bottom:122px;padding:7px 9px;font-size:10.5px}
+.bottom-action{left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));height:48px;font-size:14px;border-radius:14px}
+.zoom-chip{right:10px;top:calc(10px + env(safe-area-inset-top))}
+
+/* Export controls tightened slightly for smaller screens and matched to the mesh palette. */
+.topbar{height:64px;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;background:rgba(6,10,16,.91);border-bottom-color:rgba(67,92,120,.34)}
+body.result-mode main{min-height:calc(100dvh - 64px)}
+.result-view{min-height:calc(100dvh - 64px)}
+.mode-row{gap:6px;padding:8px 8px 5px;top:64px;background:rgba(10,16,24,.94);backdrop-filter:blur(12px)}
+.seg{min-height:46px;padding:8px 4px;border-radius:13px;font-size:10.6px;background:linear-gradient(180deg,rgba(23,31,44,.95),rgba(13,20,29,.95));border:1px solid rgba(77,99,126,.30)}
+.seg.active{background:linear-gradient(145deg,rgba(42,57,76,.98),rgba(27,39,54,.98));outline:1px solid rgba(87,217,255,.37);box-shadow:inset 0 0 16px rgba(53,207,255,.035)}
+.seg.ai-seg{font-size:10.1px}
+.result-actions{gap:7px;padding:8px 10px}.result-actions button{min-height:46px;border-radius:14px;padding:10px 11px}
+.mode-tip{margin:3px 16px 10px;padding:9px 12px;font-size:11px}
+.safe-note{margin:0 16px calc(11px + env(safe-area-inset-bottom));font-size:9.8px}
+
+/* PDF From Images */
+.pdf-view{position:relative;min-height:100dvh;padding:calc(14px + env(safe-area-inset-top)) 12px calc(72px + env(safe-area-inset-bottom));justify-content:flex-start}
+.glass-panel{background:rgba(4,8,14,.68);border:1px solid rgba(87,217,255,.25);border-radius:22px;box-shadow:0 18px 58px rgba(0,0,0,.38),inset 0 0 42px rgba(53,207,255,.018);backdrop-filter:blur(14px)}
+.pdf-shell{width:min(100%,760px);margin:0 auto;padding:12px;min-height:calc(100dvh - 96px - env(safe-area-inset-top) - env(safe-area-inset-bottom));position:relative}
+.pdf-head{display:grid;grid-template-columns:40px 1fr 40px;align-items:center;gap:10px;padding:2px 0 12px;border-bottom:1px solid rgba(92,115,143,.22)}
+.pdf-title{text-align:center;display:flex;flex-direction:column;gap:2px}.pdf-title strong{font-size:16px;letter-spacing:.01em}.pdf-title span{font-size:10px;color:#93a6b8}
+.pdf-add{font-size:24px;color:#63ddff}
+.pdf-image-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 0 4px;align-content:start}
+.pdf-item{position:relative;border-radius:16px;background:rgba(11,17,25,.86);border:1px solid rgba(91,122,154,.32);overflow:hidden;min-width:0;box-shadow:0 10px 26px rgba(0,0,0,.24);transition:transform .12s ease,border-color .12s ease,box-shadow .12s ease}
+.pdf-item.selected{border-color:rgba(87,217,255,.62);box-shadow:0 0 0 1px rgba(255,79,227,.14),0 10px 28px rgba(0,0,0,.30),0 0 20px rgba(53,207,255,.08)}
+.pdf-item.dragging{transform:scale(.96);opacity:.78;border-color:#ff4fe3;z-index:20}
+.pdf-item.drop-target{border-color:#35cfff;box-shadow:0 0 0 2px rgba(53,207,255,.28),0 0 24px rgba(53,207,255,.13)}
+.pdf-thumb{position:relative;aspect-ratio:4/5;background:#06090e;overflow:hidden}.pdf-thumb img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;user-select:none}
+.pdf-page-no{position:absolute;left:7px;top:7px;min-width:24px;height:24px;padding:0 7px;border-radius:999px;background:rgba(5,10,17,.78);border:1px solid rgba(87,217,255,.35);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:850;color:#dff7ff;backdrop-filter:blur(8px)}
+.pdf-drag-handle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:50px;height:38px;border-radius:999px;display:grid;place-items:center;background:rgba(4,9,16,.80);border:1px solid rgba(87,217,255,.42);font-size:20px;color:#65ddff;box-shadow:0 7px 24px rgba(0,0,0,.38),0 0 18px rgba(53,207,255,.10);touch-action:none;user-select:none;cursor:grab;z-index:6}
+.pdf-drag-handle:active{cursor:grabbing;color:#ff6ee8;border-color:rgba(255,79,227,.55)}
+.pdf-tile-actions{position:absolute;left:7px;right:7px;bottom:7px;z-index:8;display:grid;grid-template-columns:1fr 1fr;gap:6px;opacity:0;transform:translateY(8px);pointer-events:none;transition:.14s ease}
+.pdf-item.selected .pdf-tile-actions{opacity:1;transform:translateY(0);pointer-events:auto}
+.pdf-tile-actions button{height:36px;padding:6px 7px;border-radius:999px;font-size:11px;backdrop-filter:blur(10px);box-shadow:0 7px 20px rgba(0,0,0,.30)}
+.pdf-edit-item{background:rgba(18,42,58,.93);color:#e4fbff;border:1px solid rgba(87,217,255,.40)}
+.pdf-remove-item{background:rgba(52,20,29,.94);color:#ffe5e9;border:1px solid rgba(255,95,109,.40)}
+.pdf-name{padding:8px 9px 9px;font-size:10px;color:#93a5b7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid rgba(67,85,108,.18)}
+.pdf-empty{min-height:48dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;color:#91a2b3;padding:28px 20px}.pdf-empty.hidden{display:none!important}.pdf-empty-icon{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:30px;color:#61dcff;border:1px solid rgba(87,217,255,.35);background:rgba(13,25,38,.70);box-shadow:0 0 30px rgba(53,207,255,.08)}.pdf-empty strong{color:#eaf5ff;font-size:15px}.pdf-empty span{font-size:11px;line-height:1.4;max-width:280px}.pdf-empty button{margin-top:6px;padding:10px 15px}
+.pdf-save{position:fixed;z-index:16;max-width:736px;margin:0 auto;left:12px;right:12px}
+body.pdf-mode .pdf-save{display:block}
+
+@media(min-width:620px){.pdf-image-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:370px){.toolbar{gap:4px;left:6px;right:6px}.toolbar button{font-size:11px;gap:2px}.toolbar button span{font-size:10.5px}.seg{font-size:9.8px}.seg.ai-seg{font-size:9.3px}.home-view{padding-left:12px;padding-right:12px}.big-btn{min-height:49px;font-size:15px}.pdf-image-list{gap:8px}.pdf-drag-handle{width:46px;height:36px}}

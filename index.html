@@ -5,46 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.4" />
-  <link rel="icon" href="icons/icon-192.png?v=1.4" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.4" />
-  <link rel="stylesheet" href="styles.css?v=1.4" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.5" />
+  <link rel="icon" href="icons/icon-192.png?v=1.5" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5" />
+  <link rel="stylesheet" href="styles.css?v=1.5" />
 </head>
-<body>
+<body class="ambient-mode home-mode">
+  <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
+    <div class="home-camera-bg">
+      <video id="homeBgVideo" playsinline muted autoplay></video>
+      <div class="home-camera-vignette"></div>
+    </div>
+    <canvas id="homeMeshCanvas" class="home-mesh-canvas"></canvas>
+    <div class="home-mesh-glow"></div>
+    <div id="homeShardField" class="home-shard-field"></div>
+  </div>
+
   <header class="topbar">
-    <button id="headerBackBtn" class="header-back" aria-label="Back to editing">←</button>
+    <button id="headerBackBtn" class="header-back neon-icon-btn" aria-label="Back to editing">←</button>
     <div class="export-heading">
       <div class="brand">MeshDoctor</div>
       <div class="sub">Polish &amp; export</div>
     </div>
-    <button id="aboutBtn" class="icon-btn" aria-label="About">ⓘ</button>
+    <button id="resultHomeBtn" class="icon-btn neon-icon-btn" aria-label="Home">🏠</button>
   </header>
 
   <main>
     <section id="homeView" class="view active home-view">
-      <div class="home-camera-bg" aria-hidden="true">
-        <video id="homeBgVideo" playsinline muted autoplay></video>
-        <div class="home-camera-vignette"></div>
-      </div>
-      <div id="homeShardField" class="home-shard-field" aria-hidden="true"></div>
+      <button id="homeAboutBtn" class="home-about neon-icon-btn" aria-label="About MeshDoctor">ⓘ</button>
       <div class="hero-card splash-card">
-        <canvas id="homeMeshCanvas" class="home-mesh-canvas" aria-hidden="true"></canvas>
-        <div class="home-mesh-glow" aria-hidden="true"></div>
-        <img class="home-splash" src="assets/home-splash.png?v=1.4" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.5" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.4</div>
+      <div class="version-tag">release v1.5</div>
 
       <div class="home-actions">
-        <label class="primary big-btn">📷 Take Photo
+        <label class="primary big-btn neon-action">📷 Take Photo
           <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
         </label>
-        <label class="secondary big-btn">🖼 Choose Photo
+        <label class="secondary big-btn neon-action">🖼 Choose Photo
           <input id="galleryInput" type="file" accept="image/*" hidden />
         </label>
+        <button id="pdfBuilderBtn" class="secondary big-btn neon-action pdf-home-btn">📄 PDF From Images</button>
       </div>
     </section>
 
+    <section id="pdfView" class="view pdf-view">
+      <div class="pdf-shell glass-panel">
+        <div class="pdf-head">
+          <button id="pdfBackBtn" class="neon-icon-btn" aria-label="Back to home">←</button>
+          <div class="pdf-title">
+            <strong>PDF From Images</strong>
+            <span>Drag ↔ to reorder pages</span>
+          </div>
+          <button id="pdfAddBtn" class="neon-icon-btn pdf-add" aria-label="Add images">＋</button>
+          <input id="pdfImageInput" type="file" accept="image/*" multiple hidden />
+        </div>
+        <div id="pdfImageList" class="pdf-image-list"></div>
+        <div id="pdfEmpty" class="pdf-empty">
+          <div class="pdf-empty-icon">＋</div>
+          <strong>Add images to begin</strong>
+          <span>Each image becomes a page. Reorder them before saving.</span>
+          <button id="pdfEmptyAddBtn" class="secondary neon-action">Add Images</button>
+        </div>
+      </div>
+      <button id="savePdfBtn" class="bottom-action pdf-save mesh-correct"><span>SAVE PDF</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
+    </section>
+
     <section id="shapeView" class="view">
+      <button id="shapeBackBtn" class="shape-back neon-icon-btn shape-ui" aria-label="Back">←</button>
       <div id="stageWrap" class="stage-wrap">
         <div id="canvasPan" class="canvas-pan"><div id="canvasZoom" class="canvas-zoom"><canvas id="editCanvas"></canvas></div></div>
         <div id="loupe" class="loupe hidden"><canvas id="loupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
@@ -55,11 +83,11 @@
         <div id="zoomChip" class="zoom-chip hidden">1.0×</div>
       </div>
       <div class="hint shape-ui">Pinch to zoom. Tap a point for Move / Remove. Tap a line to add a point.</div>
-      <div class="toolbar scroll-x shape-ui">
-        <button id="autoBtn">✨ Auto</button>
-        <button id="undoPointBtn">↶ Undo</button>
-        <button id="resetBtn">◇ 4 Points</button>
-        <button id="rotateBtn">↻ Rotate</button>
+      <div class="toolbar shape-ui">
+        <button id="autoBtn" class="mesh-tool">✨ <span>Auto</span></button>
+        <button id="undoPointBtn" class="mesh-tool">↶ <span>Undo</span></button>
+        <button id="resetBtn" class="mesh-tool">◇ <span>4 Points</span></button>
+        <button id="rotateBtn" class="mesh-tool">↻ <span>Rotate</span></button>
       </div>
       <button id="correctBtn" class="bottom-action shape-ui mesh-correct"><span>CORRECT IMAGE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
     </section>
@@ -85,82 +113,63 @@
 
         <div class="slider-row">
           <span>Brightness <output id="brightnessValue">0</output></span>
-          <div id="brightnessSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Brightness" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="brightness" data-value="0">
-            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
-            <div class="mesh-slider-trail" aria-hidden="true"></div>
-            <div class="mesh-slider-thumb" aria-hidden="true"></div>
-          </div>
+          <div id="brightnessSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Brightness" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="brightness" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
         </div>
         <div class="slider-row">
           <span>Contrast <output id="contrastValue">0</output></span>
-          <div id="contrastSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Contrast" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="contrast" data-value="0">
-            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
-            <div class="mesh-slider-trail" aria-hidden="true"></div>
-            <div class="mesh-slider-thumb" aria-hidden="true"></div>
-          </div>
+          <div id="contrastSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Contrast" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="contrast" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
         </div>
         <div class="slider-row">
           <span>Saturation <output id="saturationValue">0</output></span>
-          <div id="saturationSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Saturation" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="saturation" data-value="0">
-            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
-            <div class="mesh-slider-trail" aria-hidden="true"></div>
-            <div class="mesh-slider-thumb" aria-hidden="true"></div>
-          </div>
+          <div id="saturationSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Saturation" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="saturation" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
         </div>
         <div class="slider-row">
           <span>Black level <output id="blackValue">0</output></span>
-          <div id="blackSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Black level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="black" data-value="0">
-            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
-            <div class="mesh-slider-trail" aria-hidden="true"></div>
-            <div class="mesh-slider-thumb" aria-hidden="true"></div>
-          </div>
+          <div id="blackSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Black level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="black" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
         </div>
         <div class="slider-row">
           <span>White level <output id="whiteValue">0</output></span>
-          <div id="whiteSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="White level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="white" data-value="0">
-            <div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div>
-            <div class="mesh-slider-trail" aria-hidden="true"></div>
-            <div class="mesh-slider-thumb" aria-hidden="true"></div>
-          </div>
+          <div id="whiteSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="White level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="white" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
         </div>
       </section>
 
       <section id="aiAssistPanel" class="assist-panel hidden">
         <div class="assist-head">
           <div class="assist-badge">✦</div>
-          <div><strong>AI Assisted</strong><span>GPT restoration when available, with a strong local fallback.</span></div>
+          <div><strong>AI Assisted</strong><span>AI restoration when available, with a strong local fallback.</span></div>
         </div>
         <div class="ai-choice-row">
           <button class="ai-choice" data-ai-choice="automatic">Automatic</button>
           <button class="ai-choice" data-ai-choice="document">Document</button>
           <button class="ai-choice" data-ai-choice="photo">Photo</button>
         </div>
-        <div id="aiEngineStatus" class="ai-engine-status"><i></i><span>Checking GPT image engine…</span></div>
+        <div id="aiEngineStatus" class="ai-engine-status"><i></i><span>Checking AI image engine…</span></div>
         <div id="aiChoiceStatus" class="ai-choice-status">Automatic, Document, or Photo.</div>
       </section>
 
       <div class="mode-tip">Photo restores real-world camera images. Document is for digital documents and screenshots. Automatic chooses for you.</div>
 
       <div class="result-actions">
-        <button id="shareBtn">↗ Share</button>
+        <button id="shareBtn" class="themed-secondary">↗ Share</button>
         <button id="savePngBtn" class="primary">Save PNG</button>
       </div>
-      <p class="safe-note">AI Assisted uses GPT Image 2 when the secure AI endpoint is available, with local restoration as a fallback.</p>
+      <p class="safe-note">AI Assisted uses secure AI image restoration when available, with local restoration as a fallback.</p>
     </section>
   </main>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.4</h2>
+    <h2>MeshDoctor v1.5</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
-    <p><strong>AI Assisted</strong> now attempts GPT Image 2 restoration through a secure server endpoint. If unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
-    <p><strong>v1.4:</strong> adds GPT image restoration support, a brighter home screen, the updated MeshDoctor splash artwork, and an animated neon point-and-line mesh behind the splash.</p>
+    <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
+    <p><strong>PDF From Images</strong> lets you add images, drag them into page order, edit any page through MeshDoctor, and save the finished sequence as a PDF.</p>
+    <p><strong>v1.5:</strong> adds PDF assembly, stronger full-screen neon mesh effects, compact themed controls, improved navigation, and clearer AI wording.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.4"></script>
-  <script src="app.js?v=1.4"></script>
+  <script src="config.js?v=1.5"></script>
+  <script src="app.js?v=1.5"></script>
 </body>
 </html>

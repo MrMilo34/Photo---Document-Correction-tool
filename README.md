@@ -1,43 +1,26 @@
-# MeshDoctor v1.4.1
+# MeshDoctor v1.5.0
 
+## What’s new in v1.5
+- **PDF From Images** builder added to the splash screen.
+- Add multiple images, tap a page for **Edit / Remove**, and drag the centered **↔** handle to reorder pages.
+- **Edit** routes the selected PDF page through the existing mesh correction screen and the polish / AI Assisted screen.
+- While editing a PDF page, **Save PNG** becomes **Save & Continue** and replaces that page in the PDF builder.
+- **Save PDF** creates a local PDF in the chosen page order; each image is fitted to a Letter-size page without cropping.
+- Added a visible Back button to the mesh editor.
+- The export page keeps the Back arrow and now uses **🏠 Home** in the upper-right to return to the splash screen.
+- The **ⓘ About** control moved to the upper-right of the splash screen.
+- Four mesh-tool buttons were tightened and restyled so Auto / Undo / 4 Points / Rotate fit across a phone screen.
+- Home controls and export controls now use the MeshDoctor neon blue / purple / pink visual language more consistently.
+- The animated mesh now covers the full ambient background, uses more nodes and connections, and fades toward the outside so the center reads more strongly.
+- User-facing restoration text says **AI** instead of **GPT**.
 
-## v1.4.1 deployment fix
-- GPT Image 2 edit requests now use the required multipart image upload format.
-- Default test quality is `low`.
-- API health status reports the active quality.
-- Keep the serverless function folder named exactly `api` (lowercase) for Vercel.
-- For the easiest first test, deploy the whole project to Vercel and open the Vercel URL so the frontend and `/api/ai-correct` share the same origin.
+## PDF behavior
+The PDF builder is entirely client-side. Images are converted one-by-one to JPEG for PDF embedding, fitted within a 612 × 792 point Letter page with a small margin, and saved in the order shown in the builder. The builder does not upload pages to a server.
 
-## A — v1.4 feature update
-- New `home-splash.png` supplied for MeshDoctor.
-- Main-screen dark camera overlay reduced by another ~10% and camera background brightened.
-- Animated neon point-and-line mesh now drifts around and behind the splash card, with the existing shard effects retained.
-- AI Assisted keeps only the three top-level choices: **Automatic**, **Document**, **Photo**.
-- Automatic is intentionally conservative: uncertain real-world camera captures route to Photo; Document is reserved for strongly digital/page-like content.
-- Photo local fallback is stronger in shadows and vibrance so the app still improves images when cloud AI is unavailable.
+## AI correction backend
+The secure serverless endpoint remains `api/ai-correct.js`. Its technical implementation can continue to use the configured OpenAI image model while the app presents the simpler user-facing term **AI**.
 
-## B — user-facing mode meaning
-- **Automatic** — choose the restoration path automatically.
-- **Photo** — real-world camera images: people, rooms, vehicles, faded/washed photos, low-light scenes, and photographed paperwork.
-- **Document** — digital documents, screenshots, PDF-like pages, forms, and computer-captured document content where exact readability/layout are the priority.
-
-The AI panel now shows whether **GPT Image 2** is ready or whether the app is using the local fallback, so there is no ambiguity about which engine produced the result.
-
-## C — GPT image correction implementation
-v1.4 includes a real server-side GPT image-edit path in `api/ai-correct.js`.
-
-- Model default: `gpt-image-2`
-- Endpoint used by the app: `/api/ai-correct`
-- API key stays server-side in `OPENAI_API_KEY` and is never embedded in the browser bundle.
-- Photo prompt preserves composition/identity while asking for lighting recovery, haze removal, natural vibrance, shadow recovery, highlight control, noise cleanup, and detail restoration.
-- Document prompt strongly preserves exact text/layout/content while cleaning exposure, cast, haze, compression, and readability.
-- Output resolution follows the input aspect ratio using GPT Image 2 flexible sizing.
-- If the endpoint or key is unavailable, MeshDoctor automatically uses the upgraded local restore instead of failing.
-
-### Enable GPT restoration
-This package is ready for a Vercel-style deployment because it includes `api/ai-correct.js`, `package.json`, and `vercel.json`.
-
-Set these server environment variables:
+Environment variables for Vercel:
 
 ```text
 OPENAI_API_KEY=your_server_side_key
@@ -47,12 +30,5 @@ OPENAI_IMAGE_QUALITY=low
 
 For a separate frontend such as GitHub Pages, deploy the API separately, set `MESHDOCTOR_ALLOWED_ORIGIN` on the API host, then change `config.js` to the full HTTPS `/api/ai-correct` endpoint.
 
-## Files added in v1.4
-- `api/ai-correct.js`
-- `config.js`
-- `.env.example`
-- `package.json`
-- `vercel.json`
-
 ## Cache/version
-PWA cache key is now `meshdoctor-v1.4.0`.
+PWA cache key: `meshdoctor-v1.5.0`.

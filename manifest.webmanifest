@@ -1,7 +1,7 @@
 {
   "name": "MeshDoctor",
   "short_name": "MeshDoctor",
-  "description": "MeshDoctor restores and corrects photographed documents and photos with mesh-based geometry tools, local image adjustments, and GPT-assisted Automatic, Document, and Photo restoration modes.",
+  "description": "MeshDoctor restores and corrects photographed documents and photos with mesh-based geometry tools, local image adjustments, and AI-assisted Automatic, Document, and Photo restoration modes.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e12",
