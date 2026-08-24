@@ -1,4 +1,12 @@
-# MeshDoctor v1.4
+# MeshDoctor v1.4.1
+
+
+## v1.4.1 deployment fix
+- GPT Image 2 edit requests now use the required multipart image upload format.
+- Default test quality is `low`.
+- API health status reports the active quality.
+- Keep the serverless function folder named exactly `api` (lowercase) for Vercel.
+- For the easiest first test, deploy the whole project to Vercel and open the Vercel URL so the frontend and `/api/ai-correct` share the same origin.
 
 ## A — v1.4 feature update
 - New `home-splash.png` supplied for MeshDoctor.
@@ -34,7 +42,7 @@ Set these server environment variables:
 ```text
 OPENAI_API_KEY=your_server_side_key
 OPENAI_IMAGE_MODEL=gpt-image-2
-OPENAI_IMAGE_QUALITY=medium
+OPENAI_IMAGE_QUALITY=low
 ```
 
 For a separate frontend such as GitHub Pages, deploy the API separately, set `MESHDOCTOR_ALLOWED_ORIGIN` on the API host, then change `config.js` to the full HTTPS `/api/ai-correct` endpoint.

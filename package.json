@@ -1,6 +1,6 @@
 {
   "name": "meshdoctor",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "description": "MeshDoctor photo and document correction PWA with GPT Image 2 restoration support."

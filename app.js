@@ -864,7 +864,7 @@ async function checkAiService(force=false){
     const res=await fetch(AI_ENDPOINT,{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
     if(!res.ok)throw new Error(`AI endpoint ${res.status}`);
     const data=await res.json();
-    if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} ready`);}
+    if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} · ${data.quality||'low'} ready`);}
     else{aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI key not configured');}
   }catch(err){
     aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · GPT endpoint unavailable');
@@ -898,7 +898,7 @@ async function gptRestoreImage(img,mode){
     const res=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
     let data={};try{data=await res.json();}catch{}
     if(!res.ok||!data?.image)throw new Error(data?.error||`GPT restore failed (${res.status})`);
-    aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} restore complete`);
+    aiServiceState='ready';setAiEngineStatus('ready',`${data.model||'GPT Image 2'} · ${data.quality||'low'} restore complete`);
     return await dataUrlToImageData(data.image);
   }finally{clearTimeout(timer);}
 }
