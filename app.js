@@ -22,6 +22,9 @@ let pdfEditingId = null;
 let pdfUid = 0;
 let pdfDrag = null;
 let pdfSuppressClickUntil = 0;
+const SETTINGS_KEY = 'meshdoctor-settings-v1';
+let userSettings = { pdfFilename:'MeshDoctor-created', pdfOutput:'download' };
+
 
 let points = [];
 let draggedIndex = -1;
@@ -54,6 +57,30 @@ function hideShapeUiTransient(delay=650){
 }
 let lastSliderShardAt = 0;
 
+
+
+function loadSettings(){
+  try{
+    const raw=localStorage.getItem(SETTINGS_KEY);
+    if(!raw) return;
+    const saved=JSON.parse(raw)||{};
+    userSettings={...userSettings,...saved};
+  }catch(err){ console.warn('Could not load settings', err); }
+}
+function saveSettings(){
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(userSettings)); }catch(err){ console.warn('Could not save settings', err); }
+}
+function syncSettingsUi(){
+  const name=$('settingsPdfName'), output=$('settingsPdfOutput');
+  if(name) name.value=userSettings.pdfFilename||'MeshDoctor-created';
+  if(output) output.value=userSettings.pdfOutput||'download';
+}
+function openSettingsDialog(){ syncSettingsUi(); $('settingsDialog')?.showModal(); }
+function closeSettingsDialog(){ if($('settingsDialog')?.open) $('settingsDialog').close(); }
+function sanitizeFileName(name,fallback='MeshDoctor-created'){
+  const cleaned=String(name||'').replace(/[\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
+  return cleaned || fallback;
+}
 
 async function startHomeCameraBg(){
   if(!homeBgVideo || homeBgStream || homeBgTried || !navigator.mediaDevices?.getUserMedia) return;
@@ -1254,7 +1281,22 @@ async function savePdf(){
   try{
     const pages=[];
     for(let i=0;i<pdfItems.length;i++){$('busyText').textContent=`Building PDF · ${i+1}/${pdfItems.length}`;pages.push(await pdfPageImage(pdfItems[i]));await new Promise(r=>setTimeout(r,0));}
-    const pdf=buildImagePdf(pages),url=URL.createObjectURL(pdf),a=document.createElement('a');a.href=url;a.download='MeshDoctor-created.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);toast('PDF saved to your downloads.');
+    const pdf=buildImagePdf(pages);
+    const fileName=`${sanitizeFileName(userSettings.pdfFilename,'MeshDoctor-created')}.pdf`;
+    const file=new File([pdf],fileName,{type:'application/pdf'});
+    if(userSettings.pdfOutput==='share' && navigator.canShare?.({files:[file]})){
+      try{
+        await navigator.share({files:[file], title:fileName.replace(/\.pdf$/,'')});
+        toast('PDF ready to share.');
+      }catch(err){
+        if(err?.name==='AbortError') toast('Share cancelled.');
+        else throw err;
+      }
+    }else{
+      const url=URL.createObjectURL(pdf),a=document.createElement('a');
+      a.href=url;a.download=fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+      toast('PDF saved to your downloads.');
+    }
   }catch(err){console.error(err);toast('Could not build the PDF.');}
   finally{busy(false);}
 }
@@ -1265,6 +1307,19 @@ function downloadCanvas(type='image/png'){
 async function shareCanvas(){
   resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
 }
+
+$('homeSettingsBtn')?.addEventListener('click',openSettingsDialog);
+$('settingsCloseBtn')?.addEventListener('click',closeSettingsDialog);
+$('settingsCancelBtn')?.addEventListener('click',closeSettingsDialog);
+$('settingsSaveBtn')?.addEventListener('click',()=>{
+  userSettings.pdfFilename=sanitizeFileName($('settingsPdfName')?.value,'MeshDoctor-created');
+  userSettings.pdfOutput=$('settingsPdfOutput')?.value==='share'?'share':'download';
+  saveSettings();
+  syncSettingsUi();
+  closeSettingsDialog();
+  toast('Settings saved.');
+});
+$('settingsDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeSettingsDialog();});
 
 $('cameraInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
 $('galleryInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
@@ -1311,8 +1366,9 @@ if($('pdfImportClose')) $('pdfImportClose').addEventListener('click',()=>closePd
 if($('pdfImportAdd')) $('pdfImportAdd').addEventListener('click',()=>closePdfImport([...pdfImportSelected].sort((a,b)=>a-b)));
 if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.preventDefault();closePdfImport([]);});
 
-window.addEventListener('load',()=>{ initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
+loadSettings();
+window.addEventListener('load',()=>{ syncSettingsUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.8', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.9', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
