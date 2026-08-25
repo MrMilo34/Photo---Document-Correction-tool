@@ -219,3 +219,5 @@ body.pdf-mode .pdf-save{display:block}
 @media(max-width:390px){.ai-settings-head{align-items:flex-start;flex-direction:column}.ai-test-btn{width:100%}.ai-status-row{align-items:flex-start}.ai-status-value{max-width:58%}}
 
 .ai-engine-status span{display:-webkit-box;min-width:0;max-width:100%;white-space:normal;overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+
+.ai-detail{white-space:normal!important;overflow-wrap:anywhere!important;line-height:1.45!important}

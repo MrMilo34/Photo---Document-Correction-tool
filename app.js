@@ -919,7 +919,7 @@ function renderAiDiagnostics(){
   setSettingsStatus('settingsAiLast',lastState,lastText);
   const detail=$('settingsAiDetail');if(detail){
     detail.classList.remove('ready','problem');
-    if(aiDiagnostics.last==='error'){detail.classList.add('problem');detail.textContent=shortAiMessage(aiDiagnostics.lastMessage||'The last AI restore failed.');}
+    if(aiDiagnostics.last==='error'){detail.classList.add('problem');detail.textContent=aiDiagnostics.lastMessage||'The last AI restore failed.';}
     else if(aiDiagnostics.endpoint==='ready'&&aiDiagnostics.openai==='ready'){detail.classList.add('ready');detail.textContent='AI connection is ready. The next AI Assisted restore should use the secure AI service.';}
     else if(aiDiagnostics.openai==='problem'){detail.classList.add('problem');detail.textContent=shortAiMessage(aiDiagnostics.lastMessage||'OpenAI could not be verified.');}
     else detail.textContent='Test the connection to check Vercel, your API key, and GPT Image access without generating an image.';
@@ -1030,11 +1030,23 @@ async function runAiRestoreChoice(choice){
         $('aiChoiceStatus').textContent=`AI ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
       }catch(err){
         console.warn('AI restore unavailable, using local fallback',err);
-        aiServiceState='fallback';aiDiagnostics.endpoint='ready';aiDiagnostics.openai='problem';aiDiagnostics.last='error';aiDiagnostics.lastStatus=err?.status||err?.diagnostic?.status||0;aiDiagnostics.lastMessage=err?.message||'AI request failed';aiDiagnostics.requestId=err?.diagnostic?.requestId||'';renderAiDiagnostics();
-        const code=aiDiagnostics.lastStatus?` ${aiDiagnostics.lastStatus}`:'';
-        setAiEngineStatus('fallback',`AI error${code} · ${shortAiMessage(aiDiagnostics.lastMessage,132)}`);
+        const reason=String(err?.diagnostic?.reason||'');
+        const status=err?.status||err?.diagnostic?.status||0;
+        const isSafety=reason==='safety'||/safety|moderation|policy|rejected by the safety system/i.test(err?.message||'');
+        aiDiagnostics.endpoint='ready';
+        aiDiagnostics.last='error';aiDiagnostics.lastStatus=status;aiDiagnostics.lastMessage=err?.message||'AI request failed';aiDiagnostics.requestId=err?.diagnostic?.requestId||'';
+        if(isSafety){
+          // A content-specific decline does not mean the AI service is disconnected. Keep future images eligible for AI.
+          aiServiceState='ready';aiDiagnostics.openai='ready';
+          setAiEngineStatus('fallback',`AI safety check declined this image. Local ${resolved === 'document' ? 'Document' : 'Photo'} restoration used.`);
+        }else{
+          aiServiceState='fallback';aiDiagnostics.openai='problem';
+          const code=status?` ${status}`:'';
+          setAiEngineStatus('fallback',`AI error${code} · ${shortAiMessage(aiDiagnostics.lastMessage,132)}`);
+        }
+        renderAiDiagnostics();
         aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
-        $('aiChoiceStatus').textContent=`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
+        $('aiChoiceStatus').textContent=isSafety?'Technical details are available in Settings.':`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
       }
     }else{
       aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
@@ -1430,4 +1442,4 @@ window.addEventListener('load',()=>{ syncSettingsUi(); initAmbientShards();initH
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.12', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.13', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
