@@ -16,6 +16,7 @@ let homeBgStream = null;
 let homeBgTried = false;
 let homeMeshCtx = null, homeMeshNodes = [], homeMeshRaf = 0, homeMeshLast = 0;
 let aiServiceState = 'unknown';
+let aiDiagnostics={endpoint:'unknown',openai:'unknown',model:'gpt-image-2',quality:'',last:'none',lastStatus:0,lastMessage:'',requestId:''};
 let pdfItems = [];
 let pdfSelectedId = null;
 let pdfEditingId = null;
@@ -75,7 +76,7 @@ function syncSettingsUi(){
   if(name) name.value=userSettings.pdfFilename||'MeshDoctor-created';
   if(output) output.value=userSettings.pdfOutput||'download';
 }
-function openSettingsDialog(){ syncSettingsUi(); $('settingsDialog')?.showModal(); }
+function openSettingsDialog(){ syncSettingsUi(); renderAiDiagnostics(); $('settingsDialog')?.showModal(); testAiConnection(); }
 function closeSettingsDialog(){ if($('settingsDialog')?.open) $('settingsDialog').close(); }
 function sanitizeFileName(name,fallback='MeshDoctor-created'){
   const cleaned=String(name||'').replace(/[\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
@@ -898,6 +899,55 @@ function setModeButtons(){
   $('adjustPanel').classList.toggle('hidden',currentMode!=='adjust');
   $('aiAssistPanel').classList.toggle('hidden',currentMode!=='assist');
 }
+function shortAiMessage(message,max=86){
+  const clean=String(message||'').replace(/\s+/g,' ').trim();
+  return clean.length>max?clean.slice(0,max-1)+'…':clean;
+}
+function setSettingsStatus(id,state,text){
+  const el=$(id);if(!el)return;
+  el.classList.remove('ready','problem','checking','unknown');el.classList.add(state||'unknown');
+  const b=el.querySelector('b');if(b)b.textContent=text;
+}
+function renderAiDiagnostics(){
+  setSettingsStatus('settingsAiEndpoint',aiDiagnostics.endpoint==='ready'?'ready':aiDiagnostics.endpoint==='problem'?'problem':aiDiagnostics.endpoint==='checking'?'checking':'unknown',
+    aiDiagnostics.endpoint==='ready'?'Connected':aiDiagnostics.endpoint==='problem'?'Connection problem':aiDiagnostics.endpoint==='checking'?'Checking…':'Not tested');
+  setSettingsStatus('settingsAiOpenAI',aiDiagnostics.openai==='ready'?'ready':aiDiagnostics.openai==='problem'?'problem':aiDiagnostics.openai==='checking'?'checking':'unknown',
+    aiDiagnostics.openai==='ready'?'Connected':aiDiagnostics.openai==='problem'?'Needs attention':aiDiagnostics.openai==='checking'?'Checking…':'Not tested');
+  const model=$('settingsAiModel');if(model)model.textContent=[aiDiagnostics.model,aiDiagnostics.quality].filter(Boolean).join(' · ');
+  const lastState=aiDiagnostics.last==='success'?'ready':aiDiagnostics.last==='error'?'problem':'unknown';
+  const lastText=aiDiagnostics.last==='success'?'Successful':aiDiagnostics.last==='error'?`Error ${aiDiagnostics.lastStatus||''}`.trim():'No request yet';
+  setSettingsStatus('settingsAiLast',lastState,lastText);
+  const detail=$('settingsAiDetail');if(detail){
+    detail.classList.remove('ready','problem');
+    if(aiDiagnostics.last==='error'){detail.classList.add('problem');detail.textContent=shortAiMessage(aiDiagnostics.lastMessage||'The last AI restore failed.');}
+    else if(aiDiagnostics.endpoint==='ready'&&aiDiagnostics.openai==='ready'){detail.classList.add('ready');detail.textContent='AI connection is ready. The next AI Assisted restore should use the secure AI service.';}
+    else if(aiDiagnostics.openai==='problem'){detail.classList.add('problem');detail.textContent=shortAiMessage(aiDiagnostics.lastMessage||'OpenAI could not be verified.');}
+    else detail.textContent='Test the connection to check Vercel, your API key, and GPT Image access without generating an image.';
+  }
+}
+async function testAiConnection(){
+  aiDiagnostics.endpoint='checking';aiDiagnostics.openai='checking';renderAiDiagnostics();
+  const btn=$('testAiConnectionBtn');if(btn){btn.disabled=true;btn.textContent='Testing…';}
+  try{
+    const join=AI_ENDPOINT.includes('?')?'&':'?';
+    const res=await fetch(`${AI_ENDPOINT}${join}diagnostics=1`,{method:'GET',cache:'no-store',headers:{Accept:'application/json'}});
+    let data={};try{data=await res.json();}catch{}
+    if(!res.ok)throw new Error(data?.error||`Endpoint ${res.status}`);
+    aiDiagnostics.endpoint='ready';
+    aiDiagnostics.model=data?.model||aiDiagnostics.model;aiDiagnostics.quality=data?.quality||aiDiagnostics.quality;
+    if(!data?.configured){
+      aiDiagnostics.openai='problem';aiDiagnostics.lastMessage='OpenAI API key is not configured in Vercel.';aiServiceState='fallback';
+    }else if(data?.openai?.ok){
+      aiDiagnostics.openai='ready';aiDiagnostics.model=data.openai.model||data.model||aiDiagnostics.model;aiDiagnostics.requestId=data.openai.requestId||'';aiServiceState='ready';
+    }else{
+      aiDiagnostics.openai='problem';aiDiagnostics.lastMessage=data?.openai?.message||'OpenAI model access could not be verified.';aiDiagnostics.lastStatus=data?.openai?.status||0;aiServiceState='fallback';
+    }
+  }catch(err){
+    aiDiagnostics.endpoint='problem';aiDiagnostics.openai='problem';aiDiagnostics.lastMessage=err?.message||'Connection test failed';aiServiceState='fallback';
+  }finally{
+    renderAiDiagnostics();if(btn){btn.disabled=false;btn.textContent='Test Connection';}
+  }
+}
 async function openAiAssist(){
   currentMode='assist';
   $('adjustPanel').classList.add('hidden');
@@ -920,11 +970,13 @@ async function checkAiService(force=false){
     const res=await fetch(AI_ENDPOINT,{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
     if(!res.ok)throw new Error(`AI endpoint ${res.status}`);
     const data=await res.json();
+    aiDiagnostics.endpoint='ready';aiDiagnostics.model=data?.model||aiDiagnostics.model;aiDiagnostics.quality=data?.quality||aiDiagnostics.quality;
     if(data?.configured){aiServiceState='ready';setAiEngineStatus('ready',`AI Image · ${data.quality||'low'} ready`);}
-    else{aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI key not configured');}
+    else{aiServiceState='fallback';aiDiagnostics.openai='problem';aiDiagnostics.lastMessage='OpenAI API key is not configured in Vercel.';setAiEngineStatus('fallback','Local restore · AI key not configured');}
   }catch(err){
-    aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI endpoint unavailable');
+    aiServiceState='fallback';aiDiagnostics.endpoint='problem';aiDiagnostics.openai='problem';aiDiagnostics.lastMessage=err?.message||'AI endpoint unavailable';setAiEngineStatus('fallback','Local restore · AI endpoint unavailable');
   }
+  renderAiDiagnostics();
   return aiServiceState;
 }
 
@@ -953,8 +1005,12 @@ async function gptRestoreImage(img,mode){
   try{
     const res=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
     let data={};try{data=await res.json();}catch{}
-    if(!res.ok||!data?.image)throw new Error(data?.error||`GPT restore failed (${res.status})`);
-    aiServiceState='ready';setAiEngineStatus('ready',`AI Image · ${data.quality||'low'} restore complete`);
+    if(!res.ok||!data?.image){
+      const err=new Error(data?.error||`AI restore failed (${res.status})`);
+      err.status=res.status;err.diagnostic=data?.diagnostic||{};throw err;
+    }
+    aiServiceState='ready';aiDiagnostics.endpoint='ready';aiDiagnostics.openai='ready';aiDiagnostics.last='success';aiDiagnostics.lastStatus=200;aiDiagnostics.lastMessage='';aiDiagnostics.requestId=data?.requestId||'';aiDiagnostics.model=data?.model||aiDiagnostics.model;aiDiagnostics.quality=data?.quality||aiDiagnostics.quality;renderAiDiagnostics();
+    setAiEngineStatus('ready',`AI Image · ${data.quality||'low'} restore complete`);
     return await dataUrlToImageData(data.image);
   }finally{clearTimeout(timer);}
 }
@@ -973,8 +1029,10 @@ async function runAiRestoreChoice(choice){
         aiAssistImage=await gptRestoreImage(correctedOriginal,resolved);
         $('aiChoiceStatus').textContent=`AI ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
       }catch(err){
-        console.warn('GPT restore unavailable, using local fallback',err);
-        aiServiceState='fallback';setAiEngineStatus('fallback','Local restore · AI request failed');
+        console.warn('AI restore unavailable, using local fallback',err);
+        aiServiceState='fallback';aiDiagnostics.endpoint='ready';aiDiagnostics.openai='problem';aiDiagnostics.last='error';aiDiagnostics.lastStatus=err?.status||err?.diagnostic?.status||0;aiDiagnostics.lastMessage=err?.message||'AI request failed';aiDiagnostics.requestId=err?.diagnostic?.requestId||'';renderAiDiagnostics();
+        const code=aiDiagnostics.lastStatus?` ${aiDiagnostics.lastStatus}`:'';
+        setAiEngineStatus('fallback',`AI error${code} · ${shortAiMessage(aiDiagnostics.lastMessage,54)}`);
         aiAssistImage=resolved==='document'?aggressiveCleanupImage(correctedOriginal):photoRestoreImage(correctedOriginal);
         $('aiChoiceStatus').textContent=`Local ${resolved === 'document' ? 'Document' : 'Photo'} fallback used.`;
       }
@@ -1309,6 +1367,7 @@ async function shareCanvas(){
 }
 
 $('homeSettingsBtn')?.addEventListener('click',openSettingsDialog);
+$('testAiConnectionBtn')?.addEventListener('click',testAiConnection);
 $('settingsCloseBtn')?.addEventListener('click',closeSettingsDialog);
 $('settingsCancelBtn')?.addEventListener('click',closeSettingsDialog);
 $('settingsSaveBtn')?.addEventListener('click',()=>{
@@ -1371,4 +1430,4 @@ window.addEventListener('load',()=>{ syncSettingsUi(); initAmbientShards();initH
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.10', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.11', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
