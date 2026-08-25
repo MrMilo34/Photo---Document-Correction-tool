@@ -14,22 +14,28 @@ function outputSize(width, height){
 }
 
 function promptFor(mode){
+  const common = [
+    'MeshDoctor is a restoration and correction tool for user-supplied material. Perform a faithful restoration of the supplied image rather than creating a new scene.',
+    'Preserve the original meaning, context, composition, subjects, and content. Repair visual defects only where supported by the source image, and avoid inventing major new content.'
+  ];
   if(mode === 'document'){
-    return [
-      'Clean and restore this digital document or screenshot only.',
-      'Treat the supplied image as authoritative. Preserve the exact crop, page geometry, layout, text, numbers, punctuation, logos, line breaks, spacing, borders, tables, signatures, and all other content.',
-      'Improve readability by correcting dull exposure, color cast, haze, compression artifacts, low contrast, uneven screen lighting, and mild noise. Make whites neutral and text crisp while keeping natural anti-aliasing.',
-      'Do not rewrite, correct, infer, replace, invent, remove, move, or hallucinate any text or document content. Do not redesign the document. Do not add decorative elements.',
-      'The result must look like the exact same document captured or exported cleanly at higher quality.'
-    ].join(' ');
+    return common.concat([
+      'Restore this photographed, scanned, or digital document/page for readability, archival, educational, or professional use.',
+      'The page may contain ordinary paperwork, school material, diagrams, scientific or anatomy textbook content, health information, forms, tables, signatures, logos, illustrations, or technical material. Treat these as documentary content and preserve them faithfully.',
+      'Reduce glare, reflections, shadows, haze, fading, stains, discoloration, folds, blur, noise, compression artifacts, and uneven lighting when possible.',
+      'Improve legibility, contrast, sharpness, white balance, and color balance while preserving the exact crop, page geometry, layout, text, numbers, punctuation, line breaks, spacing, borders, tables, diagrams, signatures, logos, and other visible content.',
+      'Do not rewrite, correct, infer, replace, remove, move, censor, or hallucinate document content. Do not redesign the page.',
+      'Return a cleaner and more legible version of the same document or page.'
+    ]).join(' ');
   }
-  return [
-    'Restore this real-world photograph while keeping it recognizably the exact same photo.',
-    'Treat the supplied image as authoritative. Preserve the crop, camera angle, composition, people and their identity, facial features, skin tone, body proportions, clothing, objects, background, text, logos, and scene geometry.',
-    'Correct poor lighting intelligently: recover shadow detail, control bright light sources and glare, remove gray haze or faded wash, correct color cast and white balance, reduce noise and compression artifacts, restore natural local contrast, and bring back believable vibrance and fine detail.',
-    'Aim for the look of the same moment captured with a better camera and better lighting, not a filter and not a new scene.',
-    'Do not add, remove, replace, relocate, stylize, beautify, or invent people or objects. Do not change expressions or identity. Do not fabricate text or missing scene content.'
-  ].join(' ');
+  return common.concat([
+    'Restore this real-world photograph or scanned printed photo for archival and memory-preservation purposes.',
+    'Reduce glare, reflections, haze, washout, fading, stains, discoloration, dust, scratches, scan artifacts, blur, noise, compression artifacts, and damage caused by age or uneven light exposure when possible.',
+    'Improve contrast, white balance, color balance, natural saturation, visibility, and fine detail while keeping the result believable and faithful to the original photograph.',
+    'Preserve the original people, pose, clothing, objects, background, lighting direction, camera angle, crop, composition, text, logos, and scene context.',
+    'Do not add, remove, replace, relocate, stylize, beautify, or reinterpret people or objects. Do not change expressions, relationships, clothing coverage, or the meaning of the scene.',
+    'Return a faithful restored version of the same photograph, as if the same print or moment had been captured in better condition.'
+  ]).join(' ');
 }
 
 function decodeDataUrl(dataUrl){
@@ -52,6 +58,17 @@ function safeOpenAIError(data, status, requestId=''){
     message: data?.error?.message || `OpenAI request failed (${status})`,
     requestId: requestId || ''
   };
+}
+function classifyOpenAIError(error){
+  const code=String(error?.code||'').toLowerCase();
+  const type=String(error?.type||'').toLowerCase();
+  const message=String(error?.message||'').toLowerCase();
+  if(/safety|moderation|policy|rejected by the safety system/.test(`${code} ${type} ${message}`)) return 'safety';
+  if(error?.status===401||error?.status===403) return 'authentication';
+  if(error?.status===429) return 'rate_or_quota';
+  if(error?.status>=500) return 'service';
+  if(error?.status===400) return 'request';
+  return 'unknown';
 }
 function shouldRetryMinimal(error){
   if(error?.status !== 400) return false;
@@ -167,10 +184,11 @@ export default async function handler(req, res){
     }
     if(!aiResponse.ok){
       const error=safeOpenAIError(data,aiResponse.status,requestId);
-      console.error('MeshDoctor OpenAI image edit failed',{stage:retriedMinimal?'minimal-retry':'primary',status:error.status,code:error.code,type:error.type,param:error.param,message:error.message,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode});
+      const reason=classifyOpenAIError(error);
+      console.error('MeshDoctor OpenAI image edit failed',{stage:retriedMinimal?'minimal-retry':'primary',reason,status:error.status,code:error.code,type:error.type,param:error.param,message:error.message,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode});
       return res.status(aiResponse.status).json({
         error:error.message,
-        diagnostic:{stage:'openai',status:error.status,code:error.code,type:error.type,param:error.param,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal}
+        diagnostic:{stage:'openai',reason,status:error.status,code:error.code,type:error.type,param:error.param,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal}
       });
     }
 
