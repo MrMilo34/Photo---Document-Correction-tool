@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.5.7" />
-  <link rel="icon" href="icons/icon-192.png?v=1.5.7" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.7" />
-  <link rel="stylesheet" href="styles.css?v=1.5.7" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.5.8" />
+  <link rel="icon" href="icons/icon-192.png?v=1.5.8" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.8" />
+  <link rel="stylesheet" href="styles.css?v=1.5.8" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -33,9 +33,9 @@
   <main>
     <section id="homeView" class="view active home-view">
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.5.7" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.5.8" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.5.7</div>
+      <div class="version-tag">release v1.5.8</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -44,7 +44,7 @@
         <label class="secondary big-btn neon-action">🖼 Choose Photo
           <input id="galleryInput" type="file" accept="image/*" hidden />
         </label>
-        <button id="pdfBuilderBtn" class="secondary big-btn neon-action pdf-home-btn">📄 PDF From Images</button>
+        <button id="pdfBuilderBtn" class="secondary big-btn neon-action pdf-home-btn">📄 Create a PDF</button>
       </div>
     </section>
 
@@ -53,18 +53,18 @@
         <div class="pdf-head">
           <button id="pdfBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <div class="pdf-title">
-            <strong>PDF From Images</strong>
-            <span>Drag the 4-way control to reorder pages</span>
+            <strong>Create a PDF</strong>
+            <span>Add images or selected pages from a PDF, then drag to reorder</span>
           </div>
-          <button id="pdfAddBtn" class="neon-icon-btn pdf-add" aria-label="Add images">＋</button>
-          <input id="pdfImageInput" type="file" accept="image/*" multiple hidden />
+          <button id="pdfAddBtn" class="neon-icon-btn pdf-add" aria-label="Add images or PDF pages">＋</button>
+          <input id="pdfImageInput" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
         </div>
         <div id="pdfImageList" class="pdf-image-list"></div>
         <div id="pdfEmpty" class="pdf-empty">
           <div class="pdf-empty-icon">＋</div>
-          <strong>Add images to begin</strong>
-          <span>Each image becomes a page. Reorder them before saving.</span>
-          <button id="pdfEmptyAddBtn" class="secondary neon-action">Add Images</button>
+          <strong>Add pages to begin</strong>
+          <span>Add images or import an existing PDF and choose only the pages you want.</span>
+          <button id="pdfEmptyAddBtn" class="secondary neon-action">Add Images / PDF</button>
         </div>
       </div>
       <button id="savePdfBtn" class="bottom-action pdf-save mesh-correct"><span>SAVE PDF</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
@@ -157,18 +157,40 @@
   </main>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.5.7</h2>
+    <h2>MeshDoctor v1.5.8</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
-    <p><strong>PDF From Images</strong> lets you add images, drag them into page order, edit any page through MeshDoctor, and save the finished sequence as a PDF.</p>
-    <p><strong>v1.5.7:</strong> keeps the v1.5.6 layout but changes the mesh seeding so the same amount of mesh is distributed more broadly across the screen from the start instead of feeling too condensed in the middle.</p>
+    <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
+    <p><strong>v1.5.8:</strong> makes the splash card slightly more opaque and expands PDF creation so you can add images or import an existing PDF, choose only the pages you want, omit the rest, reorder everything, edit pages, and save a new PDF.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
+  </dialog>
+
+  <dialog id="pdfImportDialog" class="pdf-import-dialog">
+    <div class="pdf-import-head">
+      <div>
+        <h2>Choose PDF Pages</h2>
+        <p id="pdfImportName">Select the pages you want to add.</p>
+      </div>
+      <button id="pdfImportClose" class="neon-icon-btn" type="button" aria-label="Cancel PDF import">✕</button>
+    </div>
+    <div class="pdf-import-tools">
+      <button id="pdfSelectAll" class="secondary" type="button">Select All</button>
+      <button id="pdfSelectNone" class="secondary" type="button">Select None</button>
+      <span id="pdfImportCount">0 selected</span>
+    </div>
+    <div id="pdfImportStatus" class="pdf-import-status">Loading pages…</div>
+    <div id="pdfImportPages" class="pdf-import-pages"></div>
+    <div class="pdf-import-actions">
+      <button id="pdfImportCancel" class="themed-secondary" type="button">Cancel</button>
+      <button id="pdfImportAdd" class="primary" type="button">Add Selected Pages</button>
+    </div>
   </dialog>
 
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.5.7"></script>
-  <script src="app.js?v=1.5.7"></script>
+  <script src="config.js?v=1.5.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
+  <script src="app.js?v=1.5.8"></script>
 </body>
 </html>
