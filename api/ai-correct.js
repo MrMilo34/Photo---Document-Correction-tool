@@ -1,14 +1,13 @@
 const MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
-const QUALITY = process.env.OPENAI_IMAGE_QUALITY || 'medium';
+const QUALITY = process.env.OPENAI_IMAGE_QUALITY || 'low';
 
 function round16(v){ return Math.max(16, Math.round(v / 16) * 16); }
 function outputSize(width, height){
   let w = Number(width) || 1024, h = Number(height) || 1024;
-  let ratio = Math.max(1/3, Math.min(3, w / Math.max(1, h)));
+  const ratio = Math.max(1 / 3, Math.min(3, w / Math.max(1, h)));
   const longEdge = 1536;
   if(ratio >= 1){ w = longEdge; h = round16(longEdge / ratio); }
   else { h = longEdge; w = round16(longEdge * ratio); }
-  // GPT Image 2 requires a minimum pixel count. 1536 x >=512 satisfies it.
   w = Math.min(3840, Math.max(512, round16(w)));
   h = Math.min(3840, Math.max(512, round16(h)));
   return `${w}x${h}`;
@@ -33,8 +32,81 @@ function promptFor(mode){
   ].join(' ');
 }
 
+function decodeDataUrl(dataUrl){
+  const match = /^data:image\/(png|jpeg|jpg|webp);base64,([\s\S]+)$/i.exec(dataUrl || '');
+  if(!match) return null;
+  const subtype = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+  return {
+    bytes: Buffer.from(match[2], 'base64'),
+    mime: `image/${subtype}`,
+    ext: subtype === 'jpeg' ? 'jpg' : subtype
+  };
+}
+
+function safeOpenAIError(data, status, requestId=''){
+  return {
+    status,
+    code: data?.error?.code || '',
+    type: data?.error?.type || '',
+    param: data?.error?.param || '',
+    message: data?.error?.message || `OpenAI request failed (${status})`,
+    requestId: requestId || ''
+  };
+}
+function shouldRetryMinimal(error){
+  if(error?.status !== 400) return false;
+  const param=String(error?.param||'').toLowerCase();
+  const message=String(error?.message||'').toLowerCase();
+  return ['size','output_format','output_compression','n','quality'].includes(param) ||
+    /invalid.*(size|format|compression|quality)|unsupported.*(size|format|compression|quality)|unknown parameter/.test(message);
+}
+async function probeOpenAI(){
+  if(!process.env.OPENAI_API_KEY) return { ok:false, status:503, message:'API key is not configured', model:MODEL };
+  try{
+    const response=await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(MODEL)}`,{
+      headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`}
+    });
+    const data=await response.json().catch(()=>({}));
+    const requestId=response.headers.get('x-request-id')||'';
+    if(!response.ok){
+      const error=safeOpenAIError(data,response.status,requestId);
+      console.error('MeshDoctor AI probe failed', {status:error.status,code:error.code,type:error.type,param:error.param,message:error.message,requestId:error.requestId,model:MODEL});
+      return {ok:false,...error,model:MODEL};
+    }
+    return {ok:true,status:response.status,model:data?.id||MODEL,requestId};
+  }catch(err){
+    console.error('MeshDoctor AI probe exception',{message:err?.message||String(err),model:MODEL});
+    return {ok:false,status:0,message:err?.message||'OpenAI probe failed',model:MODEL};
+  }
+}
+function makeEditForm(decoded,resolvedMode,size,{minimal=false}={}){
+  const form=new FormData();
+  form.append('model',MODEL);
+  form.append('image[]',new Blob([decoded.bytes],{type:decoded.mime}),`meshdoctor-input.${decoded.ext}`);
+  form.append('prompt',promptFor(resolvedMode));
+  form.append('quality',QUALITY);
+  if(!minimal){
+    const outputFormat=resolvedMode==='document'?'png':'jpeg';
+    form.append('size',size);
+    form.append('output_format',outputFormat);
+    form.append('n','1');
+    if(outputFormat==='jpeg') form.append('output_compression','92');
+  }
+  return form;
+}
+async function callImageEdit(form){
+  const response=await fetch('https://api.openai.com/v1/images/edits',{
+    method:'POST',
+    headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},
+    body:form
+  });
+  const data=await response.json().catch(()=>({}));
+  return {response,data,requestId:response.headers.get('x-request-id')||''};
+}
+
 export default async function handler(req, res){
   res.setHeader('Cache-Control', 'no-store');
+
   const allowedOrigin = process.env.MESHDOCTOR_ALLOWED_ORIGIN || '';
   const origin = req.headers?.origin || '';
   if(allowedOrigin){
@@ -44,56 +116,78 @@ export default async function handler(req, res){
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+
   if(req.method === 'OPTIONS') return res.status(204).end();
   if(req.method === 'GET'){
-    return res.status(200).json({ ok: true, configured: Boolean(process.env.OPENAI_API_KEY), model: MODEL });
+    const diagnostics = String(req.query?.diagnostics || '') === '1';
+    if(!diagnostics){
+      return res.status(200).json({
+        ok: true,
+        configured: Boolean(process.env.OPENAI_API_KEY),
+        model: MODEL,
+        quality: QUALITY
+      });
+    }
+    const probe=await probeOpenAI();
+    return res.status(200).json({
+      ok:true,
+      configured:Boolean(process.env.OPENAI_API_KEY),
+      endpoint:true,
+      model:MODEL,
+      quality:QUALITY,
+      openai:probe
+    });
   }
   if(req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if(!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'OPENAI_API_KEY is not configured' });
 
   try{
-    const { image, mode = 'photo', width, height } = req.body || {};
-    if(typeof image !== 'string' || !/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(image)){
-      return res.status(400).json({ error: 'A base64 image data URL is required' });
-    }
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const { image, mode = 'photo', width, height } = body;
+    if(typeof image !== 'string') return res.status(400).json({ error: 'A base64 image data URL is required' });
     if(image.length > 20_000_000) return res.status(413).json({ error: 'Image payload is too large' });
+
+    const decoded = decodeDataUrl(image);
+    if(!decoded) return res.status(400).json({ error: 'Unsupported image data URL' });
 
     const resolvedMode = mode === 'document' ? 'document' : 'photo';
     const size = outputSize(width, height);
-    const outputFormat = resolvedMode === 'document' ? 'png' : 'jpeg';
-    const payload = {
-      model: MODEL,
-      images: [{ image_url: image }],
-      prompt: promptFor(resolvedMode),
-      size,
-      quality: QUALITY,
-      output_format: outputFormat,
-      n: 1
-    };
-    if(outputFormat === 'jpeg') payload.output_compression = 92;
+    let outputFormat = resolvedMode === 'document' ? 'png' : 'jpeg';
+    let retriedMinimal=false;
 
-    const aiResponse = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await aiResponse.json().catch(() => ({}));
+    let {response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size));
     if(!aiResponse.ok){
-      const message = data?.error?.message || `OpenAI image edit failed (${aiResponse.status})`;
-      return res.status(aiResponse.status).json({ error: message });
+      const firstError=safeOpenAIError(data,aiResponse.status,requestId);
+      console.error('MeshDoctor OpenAI image edit failed',{stage:'primary',status:firstError.status,code:firstError.code,type:firstError.type,param:firstError.param,message:firstError.message,requestId:firstError.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,outputFormat});
+      if(shouldRetryMinimal(firstError)){
+        retriedMinimal=true;
+        ({response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size,{minimal:true})));
+        outputFormat='png';
+      }
     }
+    if(!aiResponse.ok){
+      const error=safeOpenAIError(data,aiResponse.status,requestId);
+      console.error('MeshDoctor OpenAI image edit failed',{stage:retriedMinimal?'minimal-retry':'primary',status:error.status,code:error.code,type:error.type,param:error.param,message:error.message,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode});
+      return res.status(aiResponse.status).json({
+        error:error.message,
+        diagnostic:{stage:'openai',status:error.status,code:error.code,type:error.type,param:error.param,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal}
+      });
+    }
+
     const b64 = data?.data?.[0]?.b64_json;
-    if(!b64) return res.status(502).json({ error: 'The image service returned no image data' });
+    if(!b64){
+      console.error('MeshDoctor image service returned no data',{requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode});
+      return res.status(502).json({ error: 'The image service returned no image data', diagnostic:{stage:'openai',status:502,requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal} });
+    }
 
     return res.status(200).json({
       image: `data:image/${outputFormat};base64,${b64}`,
       model: MODEL,
+      quality: QUALITY,
       mode: resolvedMode,
-      size
+      size,
+      requestId,
+      retriedMinimal
     });
   }catch(err){
     console.error('MeshDoctor AI error', err);
