@@ -66,8 +66,6 @@
           <strong>Add label images to begin</strong>
           <span>Photograph around a package or select existing photos. Keep some overlap between neighbouring images.</span>
           <button id="labelEmptyAddBtn" class="secondary neon-action">Add Images</button>
-          <button id="labelResumeProjectBtn" class="themed-secondary label-resume-project hidden" type="button">Continue Last Project</button>
-          <small id="labelResumeMeta" class="label-resume-meta hidden"></small>
         </div>
       </div>
       <button id="labelContinueBtn" class="bottom-action pdf-save mesh-correct" disabled><span>CONTINUE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
@@ -84,18 +82,16 @@
       <div id="labelAreaStage" class="label-area-stage">
         <canvas id="labelAreaCanvas"></canvas>
         <div id="labelAreaZoomChip" class="zoom-chip hidden">1.0×</div>
-        <div id="labelAreaLoupe" class="loupe label-area-loupe hidden"><canvas id="labelAreaLoupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
       </div>
       <div class="label-map-rotation glass-panel">
         <div class="label-rotation-head"><span>Straighten</span><output id="labelAreaRotationValue">0.0°</output><button id="labelAreaRotationResetBtn" type="button">Reset</button></div>
         <input id="labelAreaRotationSlider" type="range" min="-10" max="10" step="0.1" value="0" aria-label="Straighten this source label image" />
       </div>
-      <div class="label-area-help glass-panel">Start with the 4 pink corners. Tap a blue edge to add mesh points only where the label curves. Dragging a point uses reduced-speed precision movement with a magnifier. Pinch to zoom, drag empty space to pan, use the center 4-way control to move the whole mesh, and use Straighten for small rotation corrections.</div>
+      <div class="label-area-help glass-panel">Start with 4 corner points, then tap the blue edge to add extra mesh points where the label curves. Pinch to zoom, drag empty space to pan, use the center 4-way control to move the whole mesh, and use Straighten for small rotation corrections before stitching.</div>
       <div class="label-area-tools">
-        <div class="label-map-edit-actions">
-          <button id="labelAreaUndoBtn" class="themed-secondary" type="button">↶ Undo</button>
-          <button id="labelProjectSaveBtn" class="themed-secondary" type="button">💾 Save</button>
-          <button id="labelAreaRemoveBtn" class="themed-secondary" type="button" disabled>Remove Point</button>
+        <div class="label-area-edit-actions">
+          <button id="labelAreaUndoBtn" class="themed-secondary">↶ Undo</button>
+          <button id="labelAreaRemovePointBtn" class="themed-secondary">Remove Point</button>
         </div>
         <button id="labelApplyRemainingBtn" class="themed-secondary">Apply Area to Remaining</button>
         <div class="label-area-nav">
@@ -290,7 +286,7 @@
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.4:</strong> improves cylindrical label de-warping with distance-aware mesh interpolation, makes overlap matching favor real text/edge structure instead of repeated packaging patterns, detects and trims a closing 360° wrap seam, and hardens tiled AI polish so a failed tile can never export as a black/empty half. Label AI polish also preserves more of the original printed strokes and text while correcting glare and lighting.</p>
+    <p><strong>v1.6.4:</strong> label outputs now default to sequential names like <b>MeshDoctor-label 01</b>, <b>MeshDoctor-label 02</b>, and so on, with the counter advancing after each save. The label-mapping stage also continues to use the same 4-point then add-points workflow as the regular mesh editor.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 

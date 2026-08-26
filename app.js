@@ -7,7 +7,6 @@ const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { w
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
 const stageWrap = $('stageWrap'), canvasPan = $('canvasPan'), canvasZoom = $('canvasZoom');
 const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), removePointBtn = $('removePointBtn'), meshMoveAllBtn = $('meshMoveAllBtn'), zoomChip = $('zoomChip');
-const labelAreaLoupe = $('labelAreaLoupe'), labelAreaLoupeCanvas = $('labelAreaLoupeCanvas'), labelAreaLoupeCtx = labelAreaLoupeCanvas?.getContext('2d');
 const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
 const homeBgVideo = $('homeBgVideo');
@@ -25,7 +24,9 @@ let pdfUid = 0;
 let pdfDrag = null;
 let pdfSuppressClickUntil = 0;
 const SETTINGS_KEY = 'meshdoctor-settings-v1';
+const LABEL_NAME_COUNTER_KEY = 'meshdoctor-label-counter-v1';
 let userSettings = { pdfFilename:'MeshDoctor-created', outputFolderName:'Downloads' };
+let labelNameCounter = 1;
 let outputDirHandle = null;
 
 // Label Maker state
@@ -39,15 +40,12 @@ let labelAreaIndex=0;
 let labelAreaBitmap=null;
 let labelAreaDragIndex=-1;
 let labelAreaDragStart=null;
+let labelAreaSelectedIndex=-1;
+let labelAreaHistory=[];
 let labelAreaZoom=1,labelAreaPanX=0,labelAreaPanY=0;
 let labelAreaGesture=null,labelAreaPinch=null,labelAreaPinched=false;
 const labelAreaPointers=new Map();
 const LABEL_AREA_MAX_ZOOM=5;
-const LABEL_POINT_MOVE_FACTOR=.42;
-let labelAreaSelectedIndex=-1;
-let labelAreaPrecisionMove=null;
-const labelAreaSourceCanvas=document.createElement('canvas');
-const labelAreaSourceCtx=labelAreaSourceCanvas.getContext('2d');
 let labelResultImage=null;
 let labelEditorMode=false;
 let meshMoveAllDrag=null;
@@ -105,6 +103,26 @@ function loadSettings(){
 function saveSettings(){
   try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(userSettings)); }catch(err){ console.warn('Could not save settings', err); }
 }
+function loadLabelNameCounter(){
+  try{
+    const saved=Number(localStorage.getItem(LABEL_NAME_COUNTER_KEY)||'1');
+    labelNameCounter=Number.isFinite(saved)&&saved>0?Math.floor(saved):1;
+  }catch(err){ console.warn('Could not load label counter', err); }
+}
+function saveLabelNameCounter(){
+  try{ localStorage.setItem(LABEL_NAME_COUNTER_KEY, String(labelNameCounter)); }catch(err){ console.warn('Could not save label counter', err); }
+}
+function getDefaultLabelName(){
+  return `MeshDoctor-label ${String(labelNameCounter).padStart(2,'0')}`;
+}
+function advanceLabelNameCounter(){
+  labelNameCounter += 1;
+  saveLabelNameCounter();
+  if(labelEditorMode){
+    currentFileBase=getDefaultLabelName();
+    syncImageOutputName();
+  }
+}
 function syncSettingsUi(){
   const name=$('settingsPdfName');
   if(name) name.value=userSettings.pdfFilename||'MeshDoctor-created';
@@ -112,60 +130,6 @@ function syncSettingsUi(){
 }
 const OUTPUT_DB_NAME='meshdoctor-file-output';
 const OUTPUT_DB_STORE='handles';
-const LABEL_PROJECT_DB_NAME='meshdoctor-label-projects';
-const LABEL_PROJECT_DB_STORE='projects';
-const LABEL_PROJECT_KEY='last';
-function openLabelProjectDb(){
-  return new Promise((resolve,reject)=>{
-    if(!('indexedDB' in window))return resolve(null);
-    const req=indexedDB.open(LABEL_PROJECT_DB_NAME,1);
-    req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains(LABEL_PROJECT_DB_STORE))req.result.createObjectStore(LABEL_PROJECT_DB_STORE);};
-    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
-  });
-}
-async function getSavedLabelProject(){
-  try{
-    const db=await openLabelProjectDb();if(!db)return null;
-    const value=await new Promise((resolve,reject)=>{const tx=db.transaction(LABEL_PROJECT_DB_STORE,'readonly');const req=tx.objectStore(LABEL_PROJECT_DB_STORE).get(LABEL_PROJECT_KEY);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);});
-    db.close();return value;
-  }catch(err){console.warn('Could not read saved label project',err);return null;}
-}
-async function updateLabelResumeProjectUi(){
-  const btn=$('labelResumeProjectBtn'),meta=$('labelResumeMeta');if(!btn)return;
-  const project=await getSavedLabelProject(),available=!!project?.items?.length;
-  btn.classList.toggle('hidden',!available);
-  if(meta){meta.classList.toggle('hidden',!available);meta.textContent=available?`Last saved ${new Date(project.savedAt||Date.now()).toLocaleString()}`:'';}
-}
-async function saveLabelProject({quiet=false}={}){
-  if(!labelItems.length){if(!quiet)toast('Add label images before saving a project.');return false;}
-  saveCurrentLabelMapView();
-  try{
-    const db=await openLabelProjectDb();if(!db)throw new Error('Project storage is not available');
-    const data={
-      version:2,savedAt:Date.now(),stage:'mapping',areaIndex:labelAreaIndex,
-      items:labelItems.map(item=>({
-        id:item.id,name:item.name,blob:item.blob,quad:cloneQuad(item.quad||defaultLabelMesh()),
-        rotation:Number(item.rotation)||0,mapView:{...(item.mapView||{zoom:1,panX:0,panY:0})},
-        mapHistory:(item.mapHistory||[]).slice(-30).map(q=>cloneQuad(q))
-      }))
-    };
-    await new Promise((resolve,reject)=>{const tx=db.transaction(LABEL_PROJECT_DB_STORE,'readwrite');tx.objectStore(LABEL_PROJECT_DB_STORE).put(data,LABEL_PROJECT_KEY);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
-    db.close();await updateLabelResumeProjectUi();if(!quiet)toast('Label project saved.');return true;
-  }catch(err){console.error(err);if(!quiet)toast('Could not save this label project.');return false;}
-}
-async function continueSavedLabelProject(){
-  const project=await getSavedLabelProject();if(!project?.items?.length){toast('No saved label project found.');await updateLabelResumeProjectUi();return;}
-  labelItems.forEach(revokeLabelItem);
-  labelItems=project.items.filter(x=>x?.blob).map((x,i)=>({
-    id:x.id||`LBL-${Date.now().toString(36)}-${i+1}`,name:x.name||`Label-${i+1}.jpg`,blob:x.blob,url:URL.createObjectURL(x.blob),
-    quad:Array.isArray(x.quad)&&x.quad.length>=4?cloneQuad(x.quad):defaultLabelMesh(),rotation:Number(x.rotation)||0,
-    mapView:{zoom:clamp(Number(x.mapView?.zoom)||1,1,LABEL_AREA_MAX_ZOOM),panX:Number(x.mapView?.panX)||0,panY:Number(x.mapView?.panY)||0},
-    mapHistory:Array.isArray(x.mapHistory)?x.mapHistory.map(q=>cloneQuad(q)):[]
-  }));
-  labelUid=Math.max(labelUid,labelItems.length);labelSelectedId=null;labelAreaIndex=clamp(Number(project.areaIndex)||0,0,Math.max(0,labelItems.length-1));
-  renderLabelBuilder();showView('labelArea');await renderLabelArea();toast('Saved label project restored.');
-}
-
 function openOutputDb(){
   return new Promise((resolve,reject)=>{
     if(!('indexedDB' in window)) return resolve(null);
@@ -490,7 +454,7 @@ function translateWholeMesh(dx,dy,origin){
   points=origin.map(p=>({...p,x:p.x+dx,y:p.y+dy}));selectedIndex=-1;hidePointActions();renderEditor();
 }
 function startLabelPostStitchEditor(img){
-  labelEditorMode=true;pdfEditingId=null;clearAiReference(true);currentFileBase='MeshDoctor-label';
+  labelEditorMode=true;pdfEditingId=null;clearAiReference(true);currentFileBase=getDefaultLabelName();
   sourceCanvas.width=img.width;sourceCanvas.height=img.height;sctx.putImageData(img,0,0);setupEditCanvas();
   points=defaultLabelEditMesh();history=[];selectedIndex=-1;correctedOriginal=null;correctedImage=null;aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);resetViewport();renderEditor();showView('shape');
   toast('Stitch complete. Adjust the final perimeter mesh, then correct the label.');
@@ -1260,54 +1224,17 @@ async function gptRestoreImage(img,mode){
   }finally{clearTimeout(timer);}
 }
 
-function imageDataSignal(img){
-  if(!img?.data?.length)return{mean:0,std:0,opaque:0};
-  const d=img.data,step=Math.max(4,Math.floor(Math.sqrt((img.width*img.height)/16000))),vals=[];let sum=0,sum2=0,n=0,opaque=0;
-  for(let y=0;y<img.height;y+=step)for(let x=0;x<img.width;x+=step){const i=(y*img.width+x)*4,l=.299*d[i]+.587*d[i+1]+.114*d[i+2];sum+=l;sum2+=l*l;n++;if(d[i+3]>220)opaque++;}
-  const mean=n?sum/n:0,std=n?Math.sqrt(Math.max(0,sum2/n-mean*mean)):0;return{mean,std,opaque:n?opaque/n:0};
-}
-function labelAiTileUsable(restored,source){
-  const a=imageDataSignal(restored),b=imageDataSignal(source);
-  if(!restored?.width||!restored?.height||a.opaque<.92)return false;
-  if(a.mean<7&&b.mean>24)return false;
-  if(a.std<2.2&&b.std>9)return false;
-  return true;
-}
-function preserveLabelSourceDetail(source,restored){
-  const W=source.width,H=source.height,s=source.data,a=restored.data,out=new ImageData(W,H),d=out.data;
-  const lumAt=(x,y)=>{const i=(clamp(y,0,H-1)*W+clamp(x,0,W-1))*4;return .299*s[i]+.587*s[i+1]+.114*s[i+2];};
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-    const p=(y*W+x)*4,lum=.299*s[p]+.587*s[p+1]+.114*s[p+2];
-    const edge=Math.min(90,Math.abs(lum-lumAt(x-1,y))+Math.abs(lum-lumAt(x+1,y))+Math.abs(lum-lumAt(x,y-1))+Math.abs(lum-lumAt(x,y+1)));
-    // Keep printed strokes, borders, barcodes and small type anchored to the photographed
-    // pixels.  Let AI contribute more in flat/glare-heavy regions where reconstruction is useful.
-    let keep=clamp(.26+edge/90*.56+(lum<145?.12:0),.24,.88);
-    if(lum>224&&edge<12)keep=.20;
-    d[p]=s[p]*keep+a[p]*(1-keep);d[p+1]=s[p+1]*keep+a[p+1]*(1-keep);d[p+2]=s[p+2]*keep+a[p+2]*(1-keep);d[p+3]=255;
-  }
-  return out;
-}
 async function gptRestorePanoramaTiled(img,mode='document'){
   const src=document.createElement('canvas');src.width=img.width;src.height=img.height;src.getContext('2d').putImageData(img,0,0);
-  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.45))),overlap=Math.max(96,Math.round(maxTileW*.20)),step=Math.max(300,maxTileW-overlap),positions=[];
+  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.55))),overlap=Math.max(80,Math.round(maxTileW*.16)),step=Math.max(320,maxTileW-overlap),positions=[];
   for(let x=0;x<img.width;x+=step){let w=Math.min(maxTileW,img.width-x);if(img.width-(x+w)>0&&img.width-(x+w)<overlap){w=img.width-x;}positions.push({x,w});if(x+w>=img.width)break;}
   const out=document.createElement('canvas');out.width=img.width;out.height=img.height;const ox=out.getContext('2d');
-  // Never start a tiled restore on a transparent canvas.  If a later network/model tile
-  // fails, the original corrected label remains underneath instead of exporting a black half.
-  ox.drawImage(src,0,0);
   for(let i=0;i<positions.length;i++){
     const {x,w}=positions[i];$('busyText').textContent=`AI polishing label section · ${i+1}/${positions.length}`;
-    const tc=document.createElement('canvas');tc.width=w;tc.height=img.height;const tcx=tc.getContext('2d',{willReadFrequently:true});tcx.drawImage(src,x,0,w,img.height,0,0,w,img.height);const tile=tcx.getImageData(0,0,w,img.height);let restored;
+    const tc=document.createElement('canvas');tc.width=w;tc.height=img.height;tc.getContext('2d').drawImage(src,x,0,w,img.height,0,0,w,img.height);let tile=tc.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,img.height),restored;
     try{restored=await gptRestoreImage(tile,mode);}catch(err){console.warn('AI tile restore fallback',i,err);restored=cleanupImage(tile);}
-    const rc=document.createElement('canvas');rc.width=restored.width;rc.height=restored.height;rc.getContext('2d').putImageData(restored,0,0);
-    const normalizedCanvas=document.createElement('canvas');normalizedCanvas.width=w;normalizedCanvas.height=img.height;const ncx=normalizedCanvas.getContext('2d',{willReadFrequently:true});ncx.drawImage(rc,0,0,w,img.height);
-    let normalized=ncx.getImageData(0,0,w,img.height);
-    if(!labelAiTileUsable(normalized,tile)){console.warn('Rejected unusable AI label tile',i);normalized=cleanupImage(tile);}
-    else normalized=preserveLabelSourceDetail(tile,normalized);
-    ncx.putImageData(normalized,0,0);
-    if(i===0){ox.drawImage(normalizedCanvas,x,0);}else{
-      const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalizedCanvas,0,0);tx.globalCompositeOperation='destination-in';const leftOverlap=Math.min(overlap,w),g=tx.createLinearGradient(0,0,leftOverlap,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.52,'rgba(0,0,0,.52)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,leftOverlap,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);
-    }
+    const rc=document.createElement('canvas');rc.width=restored.width;rc.height=restored.height;rc.getContext('2d').putImageData(restored,0,0);const normalized=document.createElement('canvas');normalized.width=w;normalized.height=img.height;normalized.getContext('2d').drawImage(rc,0,0,w,img.height);
+    if(i===0){ox.drawImage(normalized,x,0);}else{const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalized,0,0);tx.globalCompositeOperation='destination-in';const leftOverlap=Math.min(overlap,w),g=tx.createLinearGradient(0,0,leftOverlap,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,leftOverlap,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);}
     await new Promise(r=>setTimeout(r,0));
   }
   setAiEngineStatus('ready',`AI Image · tiled ${mode} restore complete`);return out.getContext('2d',{willReadFrequently:true}).getImageData(0,0,out.width,out.height);
@@ -1411,7 +1338,7 @@ function updateResultActions(){
   if(!save)return;
   save.textContent=pdfEditingId?'Save & Continue':'Save PNG';
   save.setAttribute('aria-label',pdfEditingId?'Save edited page and return to PDF builder':(labelEditorMode?'Save stitched label PNG':'Save PNG'));
-  if(labelEditorMode){const name=$('imageOutputName');if(name&&!name.value)name.value='MeshDoctor-label';}
+  if(labelEditorMode){const name=$('imageOutputName');if(name&&!name.value)name.value=getDefaultLabelName();}
 }
 
 function pdfItemById(id){ return pdfItems.find(x=>x.id===id); }
@@ -1658,7 +1585,7 @@ function buildImagePdf(pages){
 }
 
 function makeLabelItem(file){
-  return {id:`LBL-${Date.now().toString(36)}-${(++labelUid).toString(36)}`,name:file.name||`Label-${labelUid}.jpg`,blob:file,url:URL.createObjectURL(file),quad:null,rotation:0,mapView:{zoom:1,panX:0,panY:0},mapHistory:[]};
+  return {id:`LBL-${Date.now().toString(36)}-${(++labelUid).toString(36)}`,name:file.name||`Label-${labelUid}.jpg`,blob:file,url:URL.createObjectURL(file),quad:null,rotation:0,mapView:{zoom:1,panX:0,panY:0}};
 }
 function labelItemById(id){return labelItems.find(x=>x.id===id);}
 function revokeLabelItem(item){if(item?.url)try{URL.revokeObjectURL(item.url);}catch{}}
@@ -1697,7 +1624,6 @@ function renderLabelBuilder(){
     bindLabelDrag(handle,tile,item.id);list.appendChild(tile);
   });
   $('labelContinueBtn').disabled=labelItems.length===0;
-  updateLabelResumeProjectUi().catch(()=>{});
 }
 function addLabelFiles(files){const images=[...files].filter(f=>f.type?.startsWith('image/'));if(!images.length){toast('Choose one or more images.');return;}labelItems.push(...images.map(makeLabelItem));labelSelectedId=null;renderLabelBuilder();}
 function openLabelAddDialog(){const dlg=$('labelAddDialog');if(dlg&&!dlg.open)dlg.showModal();}
@@ -1715,49 +1641,71 @@ async function captureLabelCamera(){
   const video=$('labelCameraVideo');if(!video?.videoWidth)return;const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(video.videoWidth,video.videoHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*scale));c.height=Math.max(1,Math.round(video.videoHeight*scale));c.getContext('2d').drawImage(video,0,0,c.width,c.height);const blob=await canvasBlob(c,'image/jpeg',.94);if(!blob)return;const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});addLabelFiles([file]);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);toast(`Photo ${labelCameraSessionCount} added.`);
 }
 function defaultLabelMesh(){
-  const L=.05,R=.95,T=.08,B=.92;
-  return [{x:L,y:T,corner:0},{x:R,y:T,corner:1},{x:R,y:B,corner:2},{x:L,y:B,corner:3}];
+  const L=.14,R=.86,T=.16,B=.84;
+  return [
+    {x:L,y:T,corner:0},
+    {x:R,y:T,corner:1},
+    {x:R,y:B,corner:2},
+    {x:L,y:B,corner:3}
+  ];
 }
-function cloneQuad(q){return (q||[]).map(p=>({...p}));}
-function labelAreaCenter(q){return{x:q.reduce((s,p)=>s+p.x,0)/Math.max(1,q.length),y:q.reduce((s,p)=>s+p.y,0)/Math.max(1,q.length)};}
-function labelMapHistory(item){if(!item.mapHistory)item.mapHistory=[];return item.mapHistory;}
-function pushLabelMapHistory(item){const h=labelMapHistory(item);h.push(cloneQuad(item.quad||defaultLabelMesh()));if(h.length>30)h.shift();}
-function updateLabelAreaPointButtons(){
-  const item=labelItems[labelAreaIndex],btn=$('labelAreaRemoveBtn'),undo=$('labelAreaUndoBtn');
-  if(btn){const p=item?.quad?.[labelAreaSelectedIndex];btn.disabled=!p||p.corner!==undefined||(item?.quad?.length||0)<=4;}
-  if(undo)undo.disabled=!item?.mapHistory?.length;
+function cloneLabelMesh(q){return (q||[]).map(p=>({...p}));}
+function cloneQuad(q){return cloneLabelMesh(q);}
+
+function labelAreaPushHistory(){
+  const item=labelItems[labelAreaIndex];
+  if(!item?.quad)return;
+  labelAreaHistory.push({quad:cloneLabelMesh(item.quad),rotation:Number(item.rotation)||0});
+  if(labelAreaHistory.length>48)labelAreaHistory.shift();
 }
-function removeSelectedLabelPoint(){
-  const item=labelItems[labelAreaIndex],p=item?.quad?.[labelAreaSelectedIndex];
-  if(!item||!p||p.corner!==undefined||item.quad.length<=4){toast('Corner points stay in place. Remove an added blue point instead.');return;}
-  pushLabelMapHistory(item);item.quad.splice(labelAreaSelectedIndex,1);labelAreaSelectedIndex=-1;drawLabelArea();updateLabelAreaPointButtons();
+function labelAreaUndo(){
+  const item=labelItems[labelAreaIndex],prev=labelAreaHistory.pop();
+  if(!item||!prev){toast('Nothing to undo.');return;}
+  item.quad=cloneLabelMesh(prev.quad); item.rotation=Number(prev.rotation)||0; labelAreaSelectedIndex=-1;
+  const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');
+  if(slider)slider.value=String(item.rotation||0); if(out)out.textContent=`${(item.rotation||0).toFixed(1)}°`;
+  drawLabelArea();
 }
-function undoLabelArea(){
-  const item=labelItems[labelAreaIndex],h=item?.mapHistory;if(!item||!h?.length){toast('Nothing to undo yet.');return;}
-  item.quad=h.pop();labelAreaSelectedIndex=-1;drawLabelArea();updateLabelAreaPointButtons();
+function labelAreaNearestPoint(pos,q,radiusCss=48){
+  let best=-1,bd=Infinity;
+  q.forEach((pt,i)=>{const d=Math.hypot((pt.x-pos.x)*pos.cssW,(pt.y-pos.y)*pos.cssH); if(d<bd){bd=d; best=i;}});
+  return bd<=radiusCss?best:-1;
 }
-function closestLabelSegment(q,p,cssW,cssH){
-  let best={index:-1,distance:Infinity,point:null};
+function labelAreaNearestEdge(pos,q){
+  let best={d:Infinity,i:-1,x:pos.x,y:pos.y};
+  const px={x:pos.x,y:pos.y};
   for(let i=0;i<q.length;i++){
-    const a=q[i],b=q[(i+1)%q.length],ax=a.x*cssW,ay=a.y*cssH,bx=b.x*cssW,by=b.y*cssH,px=p.x*cssW,py=p.y*cssH;
-    const vx=bx-ax,vy=by-ay,len2=vx*vx+vy*vy,t=len2?clamp(((px-ax)*vx+(py-ay)*vy)/len2,0,1):0,tx=ax+vx*t,ty=ay+vy*t,d=Math.hypot(px-tx,py-ty);
-    if(d<best.distance)best={index:i,distance:d,point:{x:tx/cssW,y:ty/cssH}};
+    const a=q[i],b=q[(i+1)%q.length];
+    const r=pointSegDistance(px,a,b),dx=(r.x-pos.x)*pos.cssW,dy=(r.y-pos.y)*pos.cssH,d=Math.hypot(dx,dy);
+    if(d<best.d)best={d,i,x:r.x,y:r.y};
   }
   return best;
 }
-function meshChains(mesh){
-  const q=mesh?.length>=4?mesh:defaultLabelMesh(),ci=[0,1,2,3].map(c=>q.findIndex(p=>p.corner===c));
-  if(ci.some(i=>i<0))return meshChains(defaultLabelMesh());
-  const walk=(start,end)=>{const out=[q[start]];let i=start,guard=0;while(i!==end&&guard++<q.length+2){i=(i+1)%q.length;out.push(q[i]);}return out;};
-  return{top:walk(ci[0],ci[1]),right:walk(ci[1],ci[2]),bottom:walk(ci[2],ci[3]).reverse(),left:walk(ci[3],ci[0]).reverse()};
+function addLabelAreaPointAt(pos){
+  const item=labelItems[labelAreaIndex]; if(!item)return false;
+  const q=item.quad||defaultLabelMesh();
+  const existing=labelAreaNearestPoint(pos,q,54);
+  if(existing>=0){labelAreaSelectedIndex=existing; drawLabelArea(); return true;}
+  const best=labelAreaNearestEdge(pos,q), threshold=Math.max(34,Math.min(pos.cssW,pos.cssH)*.08);
+  if(best.i<0||best.d>threshold){labelAreaSelectedIndex=-1; drawLabelArea(); toast('Tap the blue perimeter to add a point.'); return false;}
+  labelAreaPushHistory();
+  const np={x:clamp(best.x,0,1),y:clamp(best.y,0,1)};
+  item.quad=[...q.slice(0,best.i+1),np,...q.slice(best.i+1)];
+  labelAreaSelectedIndex=best.i+1; drawLabelArea(); return true;
 }
+function removeSelectedLabelAreaPoint(){
+  const item=labelItems[labelAreaIndex]; if(!item?.quad||labelAreaSelectedIndex<0||!item.quad[labelAreaSelectedIndex]){toast('Select a blue point first.');return;}
+  if(item.quad[labelAreaSelectedIndex].corner!==undefined){toast('The four corner points stay fixed.');return;}
+  labelAreaPushHistory(); item.quad.splice(labelAreaSelectedIndex,1); labelAreaSelectedIndex=-1; drawLabelArea();
+}
+function labelAreaCenter(q){return{x:q.reduce((s,p)=>s+p.x,0)/q.length,y:q.reduce((s,p)=>s+p.y,0)/q.length};}
 function labelAreaDrawSource(ctx,canvas,bmp,rotation=0){
   ctx.save();ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate((Number(rotation)||0)*Math.PI/180);ctx.drawImage(bmp,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);ctx.restore();
 }
 function saveCurrentLabelMapView(){
   const item=labelItems[labelAreaIndex];if(!item)return;item.mapView={zoom:labelAreaZoom,panX:labelAreaPanX,panY:labelAreaPanY};
 }
-function resetLabelAreaGesture(){labelAreaDragIndex=-1;labelAreaDragStart=null;labelAreaGesture=null;labelAreaPinch=null;labelAreaPinched=false;labelAreaPrecisionMove=null;labelAreaSelectedIndex=-1;labelAreaPointers.clear();labelAreaLoupe?.classList.add('hidden');}
+function resetLabelAreaGesture(){labelAreaDragIndex=-1;labelAreaDragStart=null;labelAreaGesture=null;labelAreaPinch=null;labelAreaPinched=false;labelAreaPointers.clear();}
 function applyLabelAreaViewport(showChip=false){
   const canvas=$('labelAreaCanvas'),stage=$('labelAreaStage');if(!canvas||!stage)return;
   canvas.style.transform=`translate3d(${labelAreaPanX}px,${labelAreaPanY}px,0) scale(${labelAreaZoom})`;
@@ -1769,248 +1717,145 @@ function clampLabelAreaPan(){
 }
 async function renderLabelArea(){
   if(!labelItems.length){showView('label');return;}
-  labelAreaIndex=clamp(labelAreaIndex,0,labelItems.length-1);const item=labelItems[labelAreaIndex];if(!item.quad)item.quad=defaultLabelMesh();if(!Number.isFinite(item.rotation))item.rotation=0;if(!item.mapView)item.mapView={zoom:1,panX:0,panY:0};if(!item.mapHistory)item.mapHistory=[];
-  resetLabelAreaGesture();
+  labelAreaIndex=clamp(labelAreaIndex,0,labelItems.length-1);const item=labelItems[labelAreaIndex];if(!item.quad)item.quad=defaultLabelMesh();if(!Number.isFinite(item.rotation))item.rotation=0;if(!item.mapView)item.mapView={zoom:1,panX:0,panY:0};
+  labelAreaSelectedIndex=-1; labelAreaHistory=[]; resetLabelAreaGesture();
   try{labelAreaBitmap?.close?.();}catch{}
   labelAreaBitmap=await createImageBitmap(item.blob);const maxEdge=1500,scale=Math.min(1,maxEdge/Math.max(labelAreaBitmap.width,labelAreaBitmap.height));const canvas=$('labelAreaCanvas');canvas.width=Math.max(1,Math.round(labelAreaBitmap.width*scale));canvas.height=Math.max(1,Math.round(labelAreaBitmap.height*scale));
   labelAreaZoom=clamp(Number(item.mapView.zoom)||1,1,LABEL_AREA_MAX_ZOOM);labelAreaPanX=Number(item.mapView.panX)||0;labelAreaPanY=Number(item.mapView.panY)||0;
   const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value=String(item.rotation||0);if(out)out.textContent=`${(item.rotation||0).toFixed(1)}°`;
-  drawLabelArea();applyLabelAreaViewport(false);$('labelAreaCounter').textContent=`Image ${labelAreaIndex+1} of ${labelItems.length}`;$('labelPrevBtn').disabled=labelAreaIndex===0;$('labelNextBtn').textContent=labelAreaIndex===labelItems.length-1?'Stitch Label':'Next →';updateLabelAreaPointButtons();
+  drawLabelArea();applyLabelAreaViewport(false);$('labelAreaCounter').textContent=`Image ${labelAreaIndex+1} of ${labelItems.length}`;$('labelPrevBtn').disabled=labelAreaIndex===0;$('labelNextBtn').textContent=labelAreaIndex===labelItems.length-1?'Stitch Label':'Next →';
 }
 function drawLabelArea(){
   const canvas=$('labelAreaCanvas');if(!canvas||!labelAreaBitmap||!labelItems[labelAreaIndex])return;
   const item=labelItems[labelAreaIndex],ctx=canvas.getContext('2d'),q=item.quad||defaultLabelMesh();
-  if(labelAreaSourceCanvas.width!==canvas.width||labelAreaSourceCanvas.height!==canvas.height){labelAreaSourceCanvas.width=canvas.width;labelAreaSourceCanvas.height=canvas.height;}
-  labelAreaSourceCtx.clearRect(0,0,canvas.width,canvas.height);labelAreaDrawSource(labelAreaSourceCtx,labelAreaSourceCanvas,labelAreaBitmap,item.rotation||0);
-  ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(labelAreaSourceCanvas,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);labelAreaDrawSource(ctx,canvas,labelAreaBitmap,item.rotation||0);
   ctx.fillStyle='rgba(0,0,0,.30)';ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();ctx.drawImage(labelAreaSourceCanvas,0,0);ctx.restore();
+  ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();labelAreaDrawSource(ctx,canvas,labelAreaBitmap,item.rotation||0);ctx.restore();
   const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);grad.addColorStop(0,'#35cfff');grad.addColorStop(.5,'#697dff');grad.addColorStop(1,'#ff4fe3');
   ctx.strokeStyle=grad;ctx.lineWidth=Math.max(2,canvas.width/420);ctx.shadowBlur=12;ctx.shadowColor='#35cfff';ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.stroke();ctx.shadowBlur=0;
-  q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,r=Math.max(7,canvas.width/105);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=p.corner!==undefined?'#ff4fe3':'#6987ff';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/650);ctx.strokeStyle='#fff';ctx.stroke();if(i===labelAreaSelectedIndex){ctx.beginPath();ctx.arc(x,y,r*1.65,0,Math.PI*2);ctx.lineWidth=Math.max(2.5,canvas.width/500);ctx.strokeStyle='#6ee7ff';ctx.stroke();}});
+  const r=Math.max(7,canvas.width/105);
+  q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,isSel=i===labelAreaSelectedIndex,base=p.corner!==undefined?r*1.08:r;
+    if(isSel){ctx.beginPath();ctx.arc(x,y,base+r*.62,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.14)';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/800);ctx.strokeStyle='rgba(255,255,255,.9)';ctx.stroke();}
+    ctx.beginPath();ctx.arc(x,y,base,0,Math.PI*2);ctx.fillStyle=p.corner!==undefined?'#ff4fe3':'#6987ff';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/650);ctx.strokeStyle='#fff';ctx.stroke();
+  });
   const center=labelAreaCenter(q),cx=center.x*canvas.width,cy=center.y*canvas.height,rr=Math.max(23,canvas.width/35);
   ctx.save();ctx.shadowBlur=18;ctx.shadowColor='rgba(53,207,255,.34)';ctx.fillStyle='rgba(8,22,34,.92)';ctx.strokeStyle='rgba(87,217,255,.88)';ctx.lineWidth=Math.max(2,canvas.width/600);ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
   ctx.strokeStyle='#bff4ff';ctx.lineWidth=Math.max(2.2,canvas.width/520);ctx.lineCap='round';ctx.lineJoin='round';const arm=rr*.52,tip=rr*.22;
   ctx.beginPath();ctx.moveTo(cx-arm,cy);ctx.lineTo(cx+arm,cy);ctx.moveTo(cx,cy-arm);ctx.lineTo(cx,cy+arm);ctx.moveTo(cx-arm,cy);ctx.lineTo(cx-arm+tip,cy-tip);ctx.moveTo(cx-arm,cy);ctx.lineTo(cx-arm+tip,cy+tip);ctx.moveTo(cx+arm,cy);ctx.lineTo(cx+arm-tip,cy-tip);ctx.moveTo(cx+arm,cy);ctx.lineTo(cx+arm-tip,cy+tip);ctx.moveTo(cx,cy-arm);ctx.lineTo(cx-tip,cy-arm+tip);ctx.moveTo(cx,cy-arm);ctx.lineTo(cx+tip,cy-arm+tip);ctx.moveTo(cx,cy+arm);ctx.lineTo(cx-tip,cy+arm-tip);ctx.moveTo(cx,cy+arm);ctx.lineTo(cx+tip,cy+arm-tip);ctx.stroke();ctx.restore();
 }
-function showLabelAreaLoupe(point,ev){
-  if(!labelAreaLoupe||!labelAreaLoupeCtx||!labelAreaSourceCanvas.width)return;
-  const crop=Math.max(32,90/Math.max(1,Math.sqrt(labelAreaZoom))),zoom=3.0,px=point.x*labelAreaSourceCanvas.width,py=point.y*labelAreaSourceCanvas.height;
-  const sw=crop/zoom,sx=clamp(px-sw/2,0,Math.max(0,labelAreaSourceCanvas.width-sw)),sy=clamp(py-sw/2,0,Math.max(0,labelAreaSourceCanvas.height-sw));
-  labelAreaLoupeCtx.clearRect(0,0,160,160);labelAreaLoupeCtx.imageSmoothingEnabled=true;labelAreaLoupeCtx.drawImage(labelAreaSourceCanvas,sx,sy,sw,sw,0,0,160,160);
-  const stage=$('labelAreaStage').getBoundingClientRect(),x=ev.clientX-stage.left,y=ev.clientY-stage.top;
-  let left=x+24;if(left>stage.width-172)left=x-188;let top=y-188;if(top<4)top=y+24;
-  labelAreaLoupe.style.left=clamp(left,4,Math.max(4,stage.width-168))+'px';labelAreaLoupe.style.top=clamp(top,4,Math.max(4,stage.height-168))+'px';labelAreaLoupe.classList.remove('hidden');
-}
 function labelAreaPointerPos(ev){const c=$('labelAreaCanvas'),r=c.getBoundingClientRect();return{x:clamp((ev.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((ev.clientY-r.top)/Math.max(1,r.height),0,1),cssW:r.width,cssH:r.height};}
-function startLabelAreaPinch(){const ps=[...labelAreaPointers.values()];if(ps.length<2)return;const a=ps[0],b=ps[1],mid=midpoint(a,b);labelAreaPinch={distance:Math.max(1,screenDistance(a,b)),zoom:labelAreaZoom,panX:labelAreaPanX,panY:labelAreaPanY,mid};labelAreaPinched=true;labelAreaGesture=null;labelAreaDragIndex=-1;labelAreaDragStart=null;labelAreaPrecisionMove=null;labelAreaLoupe?.classList.add('hidden');}
+function startLabelAreaPinch(){const ps=[...labelAreaPointers.values()];if(ps.length<2)return;const a=ps[0],b=ps[1],mid=midpoint(a,b);labelAreaPinch={distance:Math.max(1,screenDistance(a,b)),zoom:labelAreaZoom,panX:labelAreaPanX,panY:labelAreaPanY,mid};labelAreaPinched=true;labelAreaGesture=null;labelAreaDragIndex=-1;labelAreaDragStart=null;}
 function handleLabelAreaPinch(){if(!labelAreaPinch||labelAreaPointers.size<2)return;const ps=[...labelAreaPointers.values()],a=ps[0],b=ps[1],dist=Math.max(1,screenDistance(a,b)),mid=midpoint(a,b),newZoom=clamp(labelAreaPinch.zoom*(dist/labelAreaPinch.distance),1,LABEL_AREA_MAX_ZOOM),factor=newZoom/labelAreaPinch.zoom,stage=$('labelAreaStage').getBoundingClientRect(),cx=stage.left+stage.width/2,cy=stage.top+stage.height/2;labelAreaPanX=(mid.x-cx)-factor*(labelAreaPinch.mid.x-cx-labelAreaPinch.panX);labelAreaPanY=(mid.y-cy)-factor*(labelAreaPinch.mid.y-cy-labelAreaPinch.panY);labelAreaZoom=newZoom;clampLabelAreaPan();applyLabelAreaViewport(true);}
 function labelAreaPointerDown(ev){
-  const item=labelItems[labelAreaIndex];if(!item)return;ev.preventDefault();try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPointers.size>=2){startLabelAreaPinch();return;}
+  const item=labelItems[labelAreaIndex];if(!item)return;ev.preventDefault();try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}
+  labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPointers.size>=2){startLabelAreaPinch();return;}
   const p=labelAreaPointerPos(ev),q=item.quad||defaultLabelMesh(),center=labelAreaCenter(q),centerDist=Math.hypot((center.x-p.x)*p.cssW,(center.y-p.y)*p.cssH);
-  if(centerDist<=44){pushLabelMapHistory(item);labelAreaSelectedIndex=-1;labelAreaDragIndex=-2;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q)};updateLabelAreaPointButtons();return;}
-  let best=-1,dist=1e9;q.forEach((pt,i)=>{const d=Math.hypot((pt.x-p.x)*p.cssW,(pt.y-p.y)*p.cssH);if(d<dist){dist=d;best=i;}});
-  if(dist<=52){
-    labelAreaSelectedIndex=best;labelAreaDragIndex=best;
-    labelAreaPrecisionMove={pointerId:ev.pointerId,index:best,startX:ev.clientX,startY:ev.clientY,origin:{x:q[best].x,y:q[best].y},historySaved:false,moved:false};
-    drawLabelArea();updateLabelAreaPointButtons();return;
-  }
-  const seg=closestLabelSegment(q,p,p.cssW,p.cssH);
-  if(seg.index>=0&&seg.distance<=30){
-    pushLabelMapHistory(item);const insertAt=seg.index+1;item.quad.splice(insertAt,0,{x:seg.point.x,y:seg.point.y});labelAreaSelectedIndex=insertAt;drawLabelArea();updateLabelAreaPointButtons();toast('Mesh point added.');return;
-  }
-  labelAreaSelectedIndex=-1;updateLabelAreaPointButtons();labelAreaGesture={type:'pan',pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,panX:labelAreaPanX,panY:labelAreaPanY};
+  if(centerDist<=44){labelAreaSelectedIndex=-1;labelAreaDragIndex=-2;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q)};drawLabelArea();return;}
+  const idx=labelAreaNearestPoint(p,q,52);
+  if(idx>=0){labelAreaSelectedIndex=idx;labelAreaDragIndex=idx;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q),historySaved:false,moved:false};drawLabelArea();return;}
+  const edge=labelAreaNearestEdge(p,q),threshold=Math.max(34,Math.min(p.cssW,p.cssH)*.08);
+  labelAreaSelectedIndex=-1;drawLabelArea();
+  labelAreaGesture={type:'blank',pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,panX:labelAreaPanX,panY:labelAreaPanY,downPos:p,moved:false,edgeOkay:edge.i>=0&&edge.d<=threshold};
 }
 function labelAreaPointerMove(ev){
   if(labelAreaPointers.has(ev.pointerId))labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPinched&&labelAreaPointers.size>=2){ev.preventDefault();handleLabelAreaPinch();return;}
   const item=labelItems[labelAreaIndex];if(!item)return;
-  if(labelAreaDragIndex===-2&&labelAreaDragStart?.pointerId===ev.pointerId){
-    const p=labelAreaPointerPos(ev),origin=labelAreaDragStart.quad,dx0=p.x-labelAreaDragStart.start.x,dy0=p.y-labelAreaDragStart.start.y,minX=Math.min(...origin.map(q=>q.x)),maxX=Math.max(...origin.map(q=>q.x)),minY=Math.min(...origin.map(q=>q.y)),maxY=Math.max(...origin.map(q=>q.y)),dx=clamp(dx0,-minX,1-maxX),dy=clamp(dy0,-minY,1-maxY);item.quad=origin.map(q=>({...q,x:q.x+dx,y:q.y+dy}));drawLabelArea();ev.preventDefault();return;
+  if(labelAreaDragIndex!==-1){const p=labelAreaPointerPos(ev);
+    if(labelAreaDragIndex===-2&&labelAreaDragStart?.quad){
+      if(!labelAreaDragStart.historySaved){labelAreaPushHistory();labelAreaDragStart.historySaved=true;}
+      const origin=labelAreaDragStart.quad,dx0=p.x-labelAreaDragStart.start.x,dy0=p.y-labelAreaDragStart.start.y,minX=Math.min(...origin.map(q=>q.x)),maxX=Math.max(...origin.map(q=>q.x)),minY=Math.min(...origin.map(q=>q.y)),maxY=Math.max(...origin.map(q=>q.y)),dx=clamp(dx0,-minX,1-maxX),dy=clamp(dy0,-minY,1-maxY);item.quad=origin.map(q=>({...q,x:q.x+dx,y:q.y+dy}));
+    }else if(labelAreaDragIndex>=0){
+      const moved=Math.hypot((p.x-labelAreaDragStart.start.x)*p.cssW,(p.y-labelAreaDragStart.start.y)*p.cssH);
+      if(moved>3&&!labelAreaDragStart.historySaved){labelAreaPushHistory();labelAreaDragStart.historySaved=true;}
+      item.quad[labelAreaDragIndex]={...item.quad[labelAreaDragIndex],x:clamp(p.x,0,1),y:clamp(p.y,0,1)};
+    }
+    drawLabelArea();ev.preventDefault();return;
   }
-  if(labelAreaPrecisionMove?.pointerId===ev.pointerId&&labelAreaPrecisionMove.index>=0){
-    const pm=labelAreaPrecisionMove,dx=ev.clientX-pm.startX,dy=ev.clientY-pm.startY;if(Math.hypot(dx,dy)<1&&!pm.moved)return;
-    if(!pm.historySaved){pushLabelMapHistory(item);pm.historySaved=true;}pm.moved=true;
-    const rect=$('labelAreaCanvas').getBoundingClientRect(),pt=item.quad[pm.index],nx=pm.origin.x+(dx/Math.max(1,rect.width))*LABEL_POINT_MOVE_FACTOR,ny=pm.origin.y+(dy/Math.max(1,rect.height))*LABEL_POINT_MOVE_FACTOR;
-    pt.x=clamp(nx,0,1);pt.y=clamp(ny,0,1);labelAreaSelectedIndex=pm.index;drawLabelArea();showLabelAreaLoupe(pt,ev);updateLabelAreaPointButtons();ev.preventDefault();return;
-  }
-  if(labelAreaGesture?.pointerId===ev.pointerId){labelAreaPanX=labelAreaGesture.panX+(ev.clientX-labelAreaGesture.startX);labelAreaPanY=labelAreaGesture.panY+(ev.clientY-labelAreaGesture.startY);clampLabelAreaPan();applyLabelAreaViewport(false);ev.preventDefault();}
+  if(labelAreaGesture?.pointerId===ev.pointerId){const dist=Math.hypot(ev.clientX-labelAreaGesture.startX,ev.clientY-labelAreaGesture.startY);if(dist>7)labelAreaGesture.moved=true;if(labelAreaGesture.moved){labelAreaPanX=labelAreaGesture.panX+(ev.clientX-labelAreaGesture.startX);labelAreaPanY=labelAreaGesture.panY+(ev.clientY-labelAreaGesture.startY);clampLabelAreaPan();applyLabelAreaViewport(false);}ev.preventDefault();}
 }
 function labelAreaPointerEnd(ev){
-  labelAreaPointers.delete(ev.pointerId);labelAreaLoupe?.classList.add('hidden');
+  labelAreaPointers.delete(ev.pointerId);
   if(labelAreaPinched){if(labelAreaPointers.size===0){labelAreaPinched=false;labelAreaPinch=null;saveCurrentLabelMapView();applyLabelAreaViewport(true);}return;}
-  labelAreaDragIndex=-1;labelAreaDragStart=null;labelAreaGesture=null;labelAreaPrecisionMove=null;saveCurrentLabelMapView();updateLabelAreaPointButtons();try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();
+  if(labelAreaDragIndex!==-1){labelAreaDragIndex=-1;labelAreaDragStart=null;saveCurrentLabelMapView();try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();return;}
+  if(labelAreaGesture?.pointerId===ev.pointerId){
+    const g=labelAreaGesture;labelAreaGesture=null;
+    if(!g.moved&&g.edgeOkay){addLabelAreaPointAt(g.downPos);} else saveCurrentLabelMapView();
+    try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();return;
+  }
+  labelAreaDragStart=null; saveCurrentLabelMapView(); try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{} ev.preventDefault();
 }
 async function startLabelAreaFlow(){if(!labelItems.length){toast('Add label images first.');return;}labelAreaIndex=0;showView('labelArea');await renderLabelArea();}
 async function labelAreaNext(){saveCurrentLabelMapView();if(labelAreaIndex<labelItems.length-1){labelAreaIndex++;await renderLabelArea();}else await buildLabelResult();}
 async function labelAreaPrevious(){saveCurrentLabelMapView();if(labelAreaIndex>0){labelAreaIndex--;await renderLabelArea();}}
-function applyLabelAreaRemaining(){const item=labelItems[labelAreaIndex];if(!item)return;for(let i=labelAreaIndex+1;i<labelItems.length;i++){labelItems[i].quad=cloneQuad(item.quad||defaultLabelMesh());labelItems[i].rotation=item.rotation||0;labelItems[i].mapHistory=[];}toast('Mesh and straightening copied to remaining images.');}
+function applyLabelAreaRemaining(){const item=labelItems[labelAreaIndex];if(!item)return;for(let i=labelAreaIndex+1;i<labelItems.length;i++){labelItems[i].quad=cloneQuad(item.quad||defaultLabelMesh());labelItems[i].rotation=item.rotation||0;}toast('Mesh and straightening copied to remaining images.');}
 function sampleChain(points,t){
-  // Mesh points are user-placed and are rarely spaced perfectly evenly.  Parameterizing
-  // by point index stretches short segments and compresses long ones, which shows up as
-  // warped logos/text after a cylindrical label is flattened.  Walk the actual edge
-  // distance instead so every output column/row represents an equal distance on the label.
-  if(!points?.length)return{x:0,y:0};
-  return samplePolyline(points,clamp(t,0,1));
+  if(points.length===1)return points[0];const x=clamp(t,0,1)*(points.length-1),i=Math.min(points.length-2,Math.floor(x)),f=x-i,a=points[i],b=points[i+1];return{x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f};
 }
 function coonsPoint(mesh,u,v){
-  const {top,right,bottom,left}=meshChains(mesh),tl=top[0],tr=top[top.length-1],bl=bottom[0],br=bottom[bottom.length-1];
-  const T=sampleChain(top,u),B=sampleChain(bottom,u),L=sampleChain(left,v),R=sampleChain(right,v);
+  // Mesh order: TL, top..., TR, right-mid, BR, bottom... reversed, BL, left-mid.
+  const top=[mesh[0],mesh[1],mesh[2],mesh[3],mesh[4]],right=[mesh[4],mesh[5],mesh[6]],bottom=[mesh[10],mesh[9],mesh[8],mesh[7],mesh[6]],left=[mesh[0],mesh[11],mesh[10]];
+  const T=sampleChain(top,u),B=sampleChain(bottom,u),L=sampleChain(left,v),R=sampleChain(right,v),tl=mesh[0],tr=mesh[4],br=mesh[6],bl=mesh[10];
   const bil={x:(1-u)*(1-v)*tl.x+u*(1-v)*tr.x+u*v*br.x+(1-u)*v*bl.x,y:(1-u)*(1-v)*tl.y+u*(1-v)*tr.y+u*v*br.y+(1-u)*v*bl.y};
   return{x:(1-v)*T.x+v*B.x+(1-u)*L.x+u*R.x-bil.x,y:(1-v)*T.y+v*B.y+(1-u)*L.y+u*R.y-bil.y};
 }
 async function warpLabelItem(item,targetH=900){
   const bmp=await createImageBitmap(item.blob);
   try{
-    const maxSrc=1700,srcScale=Math.min(1,maxSrc/Math.max(bmp.width,bmp.height)),sw=Math.max(1,Math.round(bmp.width*srcScale)),sh=Math.max(1,Math.round(bmp.height*srcScale));
-    const sc=document.createElement('canvas');sc.width=sw;sc.height=sh;const sx=sc.getContext('2d',{willReadFrequently:true});sx.save();sx.translate(sw/2,sh/2);sx.rotate((Number(item.rotation)||0)*Math.PI/180);sx.drawImage(bmp,-sw/2,-sh/2,sw,sh);sx.restore();
-    const sd=sx.getImageData(0,0,sw,sh).data,q=(item.quad||defaultLabelMesh()).map(p=>({...p,x:p.x*sw,y:p.y*sh}));
-    const {top,right,bottom,left}=meshChains(q);
-    const chainLen=a=>a.slice(1).reduce((s,p,i)=>s+Math.hypot(p.x-a[i].x,p.y-a[i].y),0),ratio=((chainLen(top)+chainLen(bottom))/2)/Math.max(1,(chainLen(left)+chainLen(right))/2);
-    const H=Math.max(420,Math.min(1000,targetH)),W=Math.max(260,Math.min(1800,Math.round(H*ratio))),out=document.createElement('canvas');out.width=W;out.height=H;const ox=out.getContext('2d'),img=ox.createImageData(W,H),od=img.data;let oi=0;
-    for(let y=0;y<H;y++){const v=y/Math.max(1,H-1);for(let x=0;x<W;x++){const u=x/Math.max(1,W-1),pp=coonsPoint(q,u,v);let px=clamp(pp.x,0,sw-1.001),py=clamp(pp.y,0,sh-1.001);const x0=px|0,y0=py|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=px-x0,fy=py-y0,i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;}od[oi+3]=255;oi+=4;}}
-    ox.putImageData(img,0,0);return out;
-  }finally{bmp.close?.();}
-}
-function labelMatchGrid(canvas,targetH=112){
-  const scale=Math.min(1,targetH/canvas.height),w=Math.max(28,Math.round(canvas.width*scale)),h=Math.max(28,Math.round(canvas.height*scale)),c=document.createElement('canvas');c.width=w;c.height=h;const cx=c.getContext('2d',{willReadFrequently:true});cx.drawImage(canvas,0,0,w,h);const d=cx.getImageData(0,0,w,h).data,g=new Float32Array(w*h),gx=new Float32Array(w*h),gy=new Float32Array(w*h);
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x,p=i*4;g[i]=.299*d[p]+.587*d[p+1]+.114*d[p+2];}
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x;gx[i]=g[i]-g[y*w+Math.max(0,x-1)];gy[i]=g[i]-g[Math.max(0,y-1)*w+x];}
-  return{w,h,g,gx,gy,scale};
-}
-function labelOverlapScore(A,B,o,dy){
-  let n=0,sa=0,sb=0,saa=0,sbb=0,sab=0;
-  let ngx=0,sax=0,sbx=0,saax=0,sbbx=0,sabx=0;
-  let ngy=0,say=0,sby=0,saay=0,sbby=0,saby=0;
-  let edgeDiff=0,edgeEnergy=0;
-  const yPad=Math.max(3,Math.round(Math.min(A.h,B.h)*.07)),y1=Math.min(A.h,B.h)-yPad;
-  for(let y=yPad;y<y1;y+=2){
-    const by=y+dy;if(by<2||by>=B.h-2)continue;
-    for(let x=2;x<o-2;x+=2){
-      const ai=y*A.w+(A.w-o+x),bi=by*B.w+x,a=A.g[ai],b=B.g[bi];
-      sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b;n++;
-      const ax=A.gx[ai],bx=B.gx[bi],ay=A.gy[ai],byy=B.gy[bi];
-      const ex=Math.abs(ax)+Math.abs(bx),ey=Math.abs(ay)+Math.abs(byy);
-      // Only let real structure (text, borders, logos) vote strongly.  Flat white label
-      // areas are common and otherwise make several wrong overlaps look equally good.
-      if(ex>8){sax+=ax;sbx+=bx;saax+=ax*ax;sbbx+=bx*bx;sabx+=ax*bx;ngx++;}
-      if(ey>8){say+=ay;sby+=byy;saay+=ay*ay;sbby+=byy*byy;saby+=ay*byy;ngy++;}
-      edgeDiff+=(Math.abs(ax-bx)*.62+Math.abs(ay-byy)*.38);
-      edgeEnergy+=Math.min(80,(Math.abs(ax)+Math.abs(bx)+Math.abs(ay)+Math.abs(byy))*.25);
+    const src=document.createElement('canvas'),s=src.getContext('2d',{willReadFrequently:true}),sw=bmp.width,sh=bmp.height;
+    src.width=sw; src.height=sh; labelAreaDrawSource(s,src,bmp,item.rotation||0);
+    const q=(item.quad||defaultLabelMesh()).map(p=>({x:p.x*sw,y:p.y*sh,corner:p.corner}));
+    const top=getEdgePointsFromMesh(q,0,1), right=getEdgePointsFromMesh(q,1,2), bottom=getEdgePointsFromMesh(q,2,3), left=getEdgePointsFromMesh(q,3,0);
+    if([top,right,bottom,left].some(e=>e.length<2)) throw new Error('Invalid label mesh');
+    const rawW=Math.max(32,(polyLength(top)+polyLength(bottom))/2), rawH=Math.max(32,(polyLength(left)+polyLength(right))/2);
+    let H=Math.max(280,Math.round(targetH)), W=Math.max(160,Math.round(H*(rawW/rawH)));
+    const maxW=2400; if(W>maxW){const fit=maxW/W; W=Math.round(W*fit); H=Math.max(180,Math.round(H*fit));}
+    const out=document.createElement('canvas'); out.width=W; out.height=H; const o=out.getContext('2d',{willReadFrequently:true});
+    const img=s.getImageData(0,0,sw,sh),sd=img.data,im=o.createImageData(W,H),od=im.data;
+    const topX=new Float32Array(W),topY=new Float32Array(W),botX=new Float32Array(W),botY=new Float32Array(W);
+    const leftX=new Float32Array(H),leftY=new Float32Array(H),rightX=new Float32Array(H),rightY=new Float32Array(H);
+    for(let x=0;x<W;x++){const u=x/Math.max(1,W-1),a=samplePolylineNormalized(top,u),b=samplePolylineNormalized(bottom,1-u);topX[x]=a.x;topY[x]=a.y;botX[x]=b.x;botY[x]=b.y;}
+    for(let y=0;y<H;y++){const v=y/Math.max(1,H-1),l=samplePolylineNormalized(left,1-v),r=samplePolylineNormalized(right,v);leftX[y]=l.x;leftY[y]=l.y;rightX[y]=r.x;rightY[y]=r.y;}
+    const TL=q.find(p=>p.corner===0),TR=q.find(p=>p.corner===1),BR=q.find(p=>p.corner===2),BL=q.find(p=>p.corner===3);
+    let oi=0;
+    for(let y=0;y<H;y++){
+      const v=y/Math.max(1,H-1),lvx=leftX[y],lvy=leftY[y],rvx=rightX[y],rvy=rightY[y];
+      for(let x=0;x<W;x++){
+        const u=x/Math.max(1,W-1);
+        const bilx=(1-u)*(1-v)*TL.x+u*(1-v)*TR.x+(1-u)*v*BL.x+u*v*BR.x;
+        const bily=(1-u)*(1-v)*TL.y+u*(1-v)*TR.y+(1-u)*v*BL.y+u*v*BR.y;
+        let sx=(1-v)*topX[x]+v*botX[x]+(1-u)*lvx+u*rvx-bilx;
+        let sy=(1-v)*topY[x]+v*botY[x]+(1-u)*lvy+u*rvy-bily;
+        sx=clamp(sx,0,sw-1.001); sy=clamp(sy,0,sh-1.001);
+        const x0=sx|0,y0=sy|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=sx-x0,fy=sy-y0;
+        const i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;
+        for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;} od[oi+3]=255; oi+=4;
+      }
     }
-  }
-  if(n<28)return{score:Infinity,corr:-1,edgeCorr:-1,quality:-1,edgeEnergy:0};
-  const corrOf=(count,s1,s2,ss1,ss2,s12)=>{
-    if(count<12)return 0;
-    const cov=s12-s1*s2/count,v1=Math.max(1,ss1-s1*s1/count),v2=Math.max(1,ss2-s2*s2/count);
-    return clamp(cov/Math.sqrt(v1*v2),-1,1);
-  };
-  const corr=corrOf(n,sa,sb,saa,sbb,sab),cx=corrOf(ngx,sax,sbx,saax,sbbx,sabx),cy=corrOf(ngy,say,sby,saay,sbby,saby);
-  const edgeCorr=(cx+cy)*.5,meanEdgeDiff=edgeDiff/n,info=edgeEnergy/n;
-  const quality=corr*.52+edgeCorr*.48;
-  // Normalized correlation handles exposure differences; signed edge correlation keeps
-  // repeated bright/blank packaging from being mistaken for the same physical section.
-  const lowInfoPenalty=info<4?(4-info)*2.4:0;
-  return{score:(1-corr)*20+(1-edgeCorr)*24+meanEdgeDiff*.075+lowInfoPenalty,corr,edgeCorr,quality,edgeEnergy:info};
+    o.putImageData(im,0,0); return out;
+  } finally { bmp.close?.(); }
 }
-function estimateLabelAlignment(a,b,{closure=false}={}){
-  const A=labelMatchGrid(a),B=labelMatchGrid(b),minW=Math.min(A.w,B.w);
-  const minFrac=closure?.07:.09,maxFrac=closure?.72:.62;
-  const minO=Math.max(8,Math.round(minW*minFrac)),maxO=Math.max(minO+2,Math.round(minW*maxFrac));
-  const maxDy=Math.max(7,Math.round(Math.min(A.h,B.h)*(closure?.13:.11)));
-  let best={score:Infinity,o:minO,dy:0,corr:-1,edgeCorr:-1,quality:-1,edgeEnergy:0},runner=Infinity;
-  for(let o=minO;o<=maxO;o+=2){
-    const coverage=o/minW;
-    for(let dy=-maxDy;dy<=maxDy;dy++){
-      const m=labelOverlapScore(A,B,o,dy);
-      // Adjacent handheld shots normally overlap enough to identify the seam, but a huge
-      // overlap is risky on packaging with repeating benefit boxes.  Keep a soft physical
-      // prior while still allowing a very strong real match to win.
-      const prior=(coverage<.14?(.14-coverage)*16:0)+(coverage>.55?(coverage-.55)*18:0);
-      const score=m.score+prior;
-      if(score<best.score-.16||(Math.abs(score-best.score)<=.16&&o>best.o)){
-        runner=best.score;best={...m,score,o,dy};
-      }else if(score<runner&&Math.abs(o-best.o)>2) runner=score;
-    }
-  }
-  const scaleX=a.width/A.w,scaleY=a.height/A.h;
-  const separation=runner<Infinity?clamp((runner-best.score)/Math.max(1,Math.abs(runner)),0,1):0;
-  const confidence=clamp(separation*.38+Math.max(0,best.quality)*.62,0,1);
-  const fallback=Math.round(Math.min(a.width,b.width)*.20);
-  const strong=Number.isFinite(best.score)&&(
-    (best.quality>.24&&best.corr>.20&&best.edgeCorr>.08) ||
-    (best.corr>.58&&best.edgeEnergy>3.2)
-  );
-  const overlap=strong?Math.round(best.o*scaleX):fallback,yOffset=strong?Math.round(best.dy*scaleY):0;
-  return{
-    overlap:clamp(overlap,Math.round(Math.min(a.width,b.width)*minFrac),Math.round(Math.min(a.width,b.width)*maxFrac)),
-    yOffset,score:best.score,confidence,corr:best.corr,edgeCorr:best.edgeCorr,quality:best.quality,edgeEnergy:best.edgeEnergy,fallback:!strong
-  };
+function getEdgePointsFromMesh(mesh,cornerA,cornerB){
+  const ia=mesh.findIndex(p=>p.corner===cornerA), ib=mesh.findIndex(p=>p.corner===cornerB); if(ia<0||ib<0)return [];
+  const out=[]; let i=ia; while(true){out.push(mesh[i]); if(i===ib)break; i=(i+1)%mesh.length; if(out.length>mesh.length+1)break;} return out;
 }
-function labelSafeCanvasScale(width,height){
-  const maxW=4200,maxH=1800,maxPixels=6500000;
-  return Math.min(1,maxW/Math.max(1,width),maxH/Math.max(1,height),Math.sqrt(maxPixels/Math.max(1,width*height)));
-}
-async function stitchLabelPieces(pieces){
-  const valid=pieces.filter(p=>p?.width>1&&p?.height>1);if(!valid.length)throw new Error('No label pieces');
-  if(valid.length===1){const one=document.createElement('canvas'),s=labelSafeCanvasScale(valid[0].width,valid[0].height);one.width=Math.max(1,Math.round(valid[0].width*s));one.height=Math.max(1,Math.round(valid[0].height*s));one.getContext('2d').drawImage(valid[0],0,0,one.width,one.height);return one;}
-  const aligns=[];
-  for(let i=1;i<valid.length;i++){
-    await new Promise(r=>setTimeout(r,0));
-    aligns.push(estimateLabelAlignment(valid[i-1],valid[i]));
-  }
-  const xs=[0],ys=[0];
-  for(let i=1;i<valid.length;i++){
-    const prev=valid[i-1],a=aligns[i-1];
-    xs[i]=xs[i-1]+prev.width-a.overlap;
-    ys[i]=ys[i-1]+a.yOffset;
-  }
-  const minY=Math.min(...ys),maxY=Math.max(...valid.map((p,i)=>ys[i]+p.height));
-  const untrimmedW=Math.max(...valid.map((p,i)=>xs[i]+p.width)),rawH=Math.max(1,maxY-minY);
-
-  // A bottle/tub label is normally a closed 360° strip.  If the last photograph clearly
-  // returns into the first photograph, remove that closing overlap instead of exporting
-  // the beginning of the label a second time at the far right.
-  let circularTrim=0;
-  if(valid.length>=3){
-    const closure=estimateLabelAlignment(valid[valid.length-1],valid[0],{closure:true});
-    const verticalClose=Math.abs((ys[ys.length-1]||0)+closure.yOffset)<=Math.max(26,rawH*.09);
-    const closureStrong=!closure.fallback&&closure.quality>.36&&closure.corr>.30&&verticalClose;
-    if(closureStrong){
-      const maxTrim=Math.round(valid[valid.length-1].width*.58);
-      circularTrim=clamp(closure.overlap,0,maxTrim);
-    }
-  }
-  const rawW=Math.max(1,untrimmedW-circularTrim),s=labelSafeCanvasScale(rawW,rawH);
-  const out=document.createElement('canvas');out.width=Math.max(1,Math.round(rawW*s));out.height=Math.max(1,Math.round(rawH*s));const ctx=out.getContext('2d');
-  const drawPiece=(p,i,blend)=>{
-    const dx=Math.round(xs[i]*s),dy=Math.round((ys[i]-minY)*s),dw=Math.max(1,Math.round(p.width*s)),dh=Math.max(1,Math.round(p.height*s));
-    if(dx>=out.width)return;
-    if(!blend){ctx.drawImage(p,dx,dy,dw,dh);return;}
-    const o=Math.max(1,Math.round(aligns[i-1].overlap*s)),tmp=document.createElement('canvas');tmp.width=dw;tmp.height=dh;const tx=tmp.getContext('2d');tx.drawImage(p,0,0,dw,dh);tx.globalCompositeOperation='destination-in';
-    const g=tx.createLinearGradient(0,0,dw,0),stop=clamp(o/Math.max(1,dw),.025,.95);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(clamp(stop*.35,.01,.9),'rgba(0,0,0,.18)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,dw,dh);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,dx,dy);
-  };
-  drawPiece(valid[0],0,false);for(let i=1;i<valid.length;i++){drawPiece(valid[i],i,true);await new Promise(r=>setTimeout(r,0));}
-  return out;
-}
-async function stitchLabelPiecesFallback(pieces){
-  const valid=pieces.filter(p=>p?.width>1&&p?.height>1);if(!valid.length)throw new Error('No usable label pieces');
-  const overlapPct=.16,xs=[0];for(let i=1;i<valid.length;i++)xs[i]=xs[i-1]+valid[i-1].width-Math.round(Math.min(valid[i-1].width,valid[i].width)*overlapPct);
-  const rawW=Math.max(...valid.map((p,i)=>xs[i]+p.width)),rawH=Math.max(...valid.map(p=>p.height)),s=labelSafeCanvasScale(rawW,rawH),out=document.createElement('canvas');out.width=Math.max(1,Math.round(rawW*s));out.height=Math.max(1,Math.round(rawH*s));const ctx=out.getContext('2d');
-  valid.forEach((p,i)=>ctx.drawImage(p,Math.round(xs[i]*s),0,Math.max(1,Math.round(p.width*s)),Math.max(1,Math.round(p.height*s))));return out;
+function samplePolylineNormalized(ps,t){
+  if(ps.length===1)return ps[0]; const lens=[]; let total=0;
+  for(let i=1;i<ps.length;i++){const l=Math.hypot(ps[i].x-ps[i-1].x,ps[i].y-ps[i-1].y); lens.push(l); total+=l;}
+  if(total<1)return ps[0]; let target=t*total,acc=0;
+  for(let i=0;i<lens.length;i++){ if(target<=acc+lens[i]||i===lens.length-1){ const f=lens[i]?((target-acc)/lens[i]):0; return {x:ps[i].x+(ps[i+1].x-ps[i].x)*f,y:ps[i].y+(ps[i+1].y-ps[i].y)*f}; } acc+=lens[i]; }
+  return ps[ps.length-1];
 }
 async function buildLabelResult(){
   busy(true,'Preparing label sections…');
   try{
-    saveCurrentLabelMapView();const pieces=[],targetH=Math.max(640,Math.min(820,820-Math.max(0,labelItems.length-3)*60));
-    for(let i=0;i<labelItems.length;i++){$('busyText').textContent=`Flattening label section · ${i+1}/${labelItems.length}`;pieces.push(await warpLabelItem(labelItems[i],targetH));await new Promise(r=>setTimeout(r,0));}
-    $('busyText').textContent='Recognizing matching detail & stitching…';
-    let stitched;
-    try{stitched=await stitchLabelPieces(pieces);}catch(matchErr){console.warn('Recognition stitch fell back to safe stitch',matchErr);$('busyText').textContent='Using safe overlap stitch…';stitched=await stitchLabelPiecesFallback(pieces);}
-    if(!stitched?.width||!stitched?.height)throw new Error('Stitch output was empty');
-    const ctx=stitched.getContext('2d',{willReadFrequently:true});labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
-    saveLabelProject({quiet:true}).catch(()=>{});
-    $('busyText').textContent='Opening mesh editor…';await new Promise(r=>setTimeout(r,20));startLabelPostStitchEditor(labelResultImage);
-  }catch(err){console.error(err);toast('Stitching could not finish on this device. Try one fewer image or slightly smaller selected areas.');}
+    const pieces=[];
+    for(let i=0;i<labelItems.length;i++){$('busyText').textContent=`Flattening label section · ${i+1}/${labelItems.length}`;pieces.push(await warpLabelItem(labelItems[i],900));await new Promise(r=>setTimeout(r,0));}
+    $('busyText').textContent='Matching overlaps & stitching…';
+    const stitched=await stitchLabelPieces(pieces),ctx=stitched.getContext('2d',{willReadFrequently:true});
+    labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
+    $('busyText').textContent='Opening mesh editor…';await new Promise(r=>setTimeout(r,20));
+    startLabelPostStitchEditor(labelResultImage);
+  }catch(err){console.error(err);toast('Could not stitch these label images. Try adjusting the selected areas.');}
   finally{busy(false);}
 }
 async function aiPolishLabelResult(){
@@ -2021,10 +1866,11 @@ function promptFileName({title='Name your file',help='Choose the name used when 
 }
 function closeFileNameDialog(value=null){if($('fileNameDialog')?.open)$('fileNameDialog').close();const resolve=fileNameResolve;fileNameResolve=null;if(resolve)resolve(value);}
 async function requestPdfSave(){if(!pdfItems.length){toast('Add pages first.');return;}const name=await promptFileName({title:'Name your PDF',help:'Choose the filename for this PDF.',defaultName:userSettings.pdfFilename||'MeshDoctor-created',extension:'.pdf'});if(!name)return;userSettings.pdfFilename=name;saveSettings();syncSettingsUi();await savePdf(name);}
-async function saveLabelResult(){if(!labelResultImage)return;const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:'MeshDoctor-label',extension:'.png'});if(!name)return;const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob)await saveBlobToOutput(blob,`${name}.png`,'Images');}
+async function saveLabelResult(){if(!labelResultImage)return;const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:getDefaultLabelName(),extension:'.png'});if(!name)return;const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob){await saveBlobToOutput(blob,`${name}.png`,'Images');advanceLabelNameCounter();}}
 async function saveLabelEditorResult(){
-  const name=sanitizeFileName($('imageOutputName')?.value||'MeshDoctor-label','MeshDoctor-label');
-  const blob=await canvasBlob(resultCanvas,'image/png');if(blob)await saveBlobToOutput(blob,`${name}.png`,'Images');
+  const fallback=getDefaultLabelName();
+  const name=sanitizeFileName($('imageOutputName')?.value||fallback,fallback);
+  const blob=await canvasBlob(resultCanvas,'image/png');if(blob){await saveBlobToOutput(blob,`${name}.png`,'Images');advanceLabelNameCounter();}
 }
 
 async function savePdf(baseName=userSettings.pdfFilename){
@@ -2092,7 +1938,7 @@ $('labelAddDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeLab
 $('labelCameraChoiceBtn')?.addEventListener('click',startLabelCamera);
 $('labelPhotosChoiceBtn')?.addEventListener('click',()=>{closeLabelAddDialog();$('labelPhotoInput').click();});
 $('labelPhotoInput')?.addEventListener('change',e=>{addLabelFiles(e.target.files||[]);e.target.value='';});
-$('labelReplaceInput')?.addEventListener('change',e=>{const file=e.target.files?.[0];e.target.value='';if(!file||!labelReplaceTargetId)return;const item=labelItemById(labelReplaceTargetId);labelReplaceTargetId=null;if(!item)return;revokeLabelItem(item);item.blob=file;item.url=URL.createObjectURL(file);item.name=file.name||item.name;item.quad=null;item.rotation=0;item.mapView={zoom:1,panX:0,panY:0};item.mapHistory=[];renderLabelBuilder();toast('Label image replaced.');});
+$('labelReplaceInput')?.addEventListener('change',e=>{const file=e.target.files?.[0];e.target.value='';if(!file||!labelReplaceTargetId)return;const item=labelItemById(labelReplaceTargetId);labelReplaceTargetId=null;if(!item)return;revokeLabelItem(item);item.blob=file;item.url=URL.createObjectURL(file);item.name=file.name||item.name;item.quad=null;item.rotation=0;item.mapView={zoom:1,panX:0,panY:0};renderLabelBuilder();toast('Label image replaced.');});
 $('labelContinueBtn')?.addEventListener('pointerdown',burstCorrectButton);
 $('labelContinueBtn')?.addEventListener('click',startLabelAreaFlow);
 $('labelCameraCaptureBtn')?.addEventListener('click',captureLabelCamera);
@@ -2100,20 +1946,21 @@ $('labelCameraDoneBtn')?.addEventListener('click',stopLabelCamera);
 $('labelCameraCancelBtn')?.addEventListener('click',stopLabelCamera);
 $('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();stopLabelCamera();});
 $('labelAreaBackBtn')?.addEventListener('click',()=>showView('label'));
-$('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){pushLabelMapHistory(item);item.quad=defaultLabelMesh();item.rotation=0;labelAreaSelectedIndex=-1;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();updateLabelAreaPointButtons();toast('Label mapping reset to 4 corners.');}});
+$('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){labelAreaPushHistory();item.quad=defaultLabelMesh();item.rotation=0;labelAreaSelectedIndex=-1;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();toast('Reset to the base 4-point mesh.');}});
 $('labelApplyRemainingBtn')?.addEventListener('click',applyLabelAreaRemaining);
-$('labelAreaUndoBtn')?.addEventListener('click',undoLabelArea);
-$('labelAreaRemoveBtn')?.addEventListener('click',removeSelectedLabelPoint);
-$('labelProjectSaveBtn')?.addEventListener('click',saveLabelProject);
-$('labelResumeProjectBtn')?.addEventListener('click',continueSavedLabelProject);
+$('labelAreaUndoBtn')?.addEventListener('click',labelAreaUndo);
+$('labelAreaRemovePointBtn')?.addEventListener('click',removeSelectedLabelAreaPoint);
 $('labelPrevBtn')?.addEventListener('click',labelAreaPrevious);
 $('labelNextBtn')?.addEventListener('click',labelAreaNext);
 $('labelAreaCanvas')?.addEventListener('pointerdown',labelAreaPointerDown);
 $('labelAreaCanvas')?.addEventListener('pointermove',labelAreaPointerMove);
 $('labelAreaCanvas')?.addEventListener('pointerup',labelAreaPointerEnd);
 $('labelAreaCanvas')?.addEventListener('pointercancel',labelAreaPointerEnd);
+$('labelAreaRotationSlider')?.addEventListener('pointerdown',()=>{const item=labelItems[labelAreaIndex];if(item&&!$('labelAreaRotationSlider').dataset.dragging){labelAreaPushHistory();$('labelAreaRotationSlider').dataset.dragging='1';}});
+$('labelAreaRotationSlider')?.addEventListener('pointerup',()=>{if($('labelAreaRotationSlider')) delete $('labelAreaRotationSlider').dataset.dragging;});
+$('labelAreaRotationSlider')?.addEventListener('pointercancel',()=>{if($('labelAreaRotationSlider')) delete $('labelAreaRotationSlider').dataset.dragging;});
 $('labelAreaRotationSlider')?.addEventListener('input',ev=>{const item=labelItems[labelAreaIndex];if(!item)return;item.rotation=clamp(Number(ev.target.value)||0,-10,10);const out=$('labelAreaRotationValue');if(out)out.textContent=`${item.rotation.toFixed(1)}°`;drawLabelArea();});
-$('labelAreaRotationResetBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(!item)return;item.rotation=0;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();});
+$('labelAreaRotationResetBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(!item)return;labelAreaPushHistory();item.rotation=0;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();});
 $('labelResultBackBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
 $('labelRebuildBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
 $('labelAiPolishBtn')?.addEventListener('click',aiPolishLabelResult);
@@ -2183,8 +2030,9 @@ if($('pdfImportAdd')) $('pdfImportAdd').addEventListener('click',()=>closePdfImp
 if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.preventDefault();closePdfImport([]);});
 
 loadSettings();
-window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();renderLabelBuilder();updateLabelResumeProjectUi().catch(()=>{});if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
+loadLabelNameCounter();
+window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();renderLabelBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.3', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.4', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
