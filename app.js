@@ -54,6 +54,9 @@ const shapeRotationBase=document.createElement('canvas');
 const shapeRotationBaseCtx=shapeRotationBase.getContext('2d');
 let labelCameraStream=null;
 let labelCameraSessionCount=0;
+let labelCameraGuideState=null;
+let labelCameraRaf=0;
+let labelCameraWorking=false;
 let fileNameResolve=null;
 
 
@@ -1626,19 +1629,113 @@ function renderLabelBuilder(){
   $('labelContinueBtn').disabled=labelItems.length===0;
 }
 function addLabelFiles(files){const images=[...files].filter(f=>f.type?.startsWith('image/'));if(!images.length){toast('Choose one or more images.');return;}labelItems.push(...images.map(makeLabelItem));labelSelectedId=null;renderLabelBuilder();}
+
 function openLabelAddDialog(){const dlg=$('labelAddDialog');if(dlg&&!dlg.open)dlg.showModal();}
 function closeLabelAddDialog(){if($('labelAddDialog')?.open)$('labelAddDialog').close();}
+function defaultLabelCameraGuideState(){
+  return {
+    mirror:true,
+    auto:true,
+    points:{
+      top:[{x:0,y:.18},{x:.24,y:.14},{x:.5,y:.12},{x:.76,y:.14},{x:1,y:.18}],
+      bottom:[{x:0,y:.82},{x:.24,y:.86},{x:.5,y:.88},{x:.76,y:.86},{x:1,y:.82}]
+    },
+    prevStrip:null,
+    currentStrip:null,
+    alignScore:0,
+    matchFrames:0,
+    lastCaptureAt:0,
+    dragging:null,
+    instruction:'Line the label up inside the curved guide. Match the ghosted strip from the previous photo, then rotate the bottle.'
+  };
+}
+function syncLabelCameraMirror(){
+  const s=labelCameraGuideState;if(!s)return;
+  const t=s.points.top,b=s.points.bottom;
+  t[3]={x:1-t[1].x,y:t[1].y}; t[4]={x:1-t[0].x,y:t[0].y}; t[2].x=.5;
+  b[3]={x:1-b[1].x,y:b[1].y}; b[4]={x:1-b[0].x,y:b[0].y}; b[2].x=.5;
+}
+function getLabelCameraGuideRect(canvas){const w=canvas.width,h=canvas.height;return{x:w*.10,y:h*.11,w:w*.80,h:h*.74};}
+function getLabelCameraEditableRefs(){
+  const s=labelCameraGuideState;if(!s)return[];
+  if(s.mirror)return [{row:'top',i:0},{row:'top',i:1},{row:'top',i:2},{row:'bottom',i:0},{row:'bottom',i:1},{row:'bottom',i:2}];
+  return [...Array(5)].flatMap((_,i)=>[{row:'top',i},{row:'bottom',i}]);
+}
+function labelCameraPointToPixel(ref,rect){const p=labelCameraGuideState.points[ref.row][ref.i];return{x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h};}
+function setLabelCameraPoint(ref,nx,ny){
+  const s=labelCameraGuideState;if(!s)return;
+  const row=s.points[ref.row];
+  nx=clamp(nx,0,1); ny=clamp(ny, ref.row==='top'? .04 :.60, ref.row==='top'? .42 :.96);
+  if(s.mirror){ if(ref.i===0) nx=0; if(ref.i===1) nx=clamp(nx,.10,.43); if(ref.i===2) nx=.5; }
+  row[ref.i]={...row[ref.i],x:nx,y:ny};
+  if(s.mirror) syncLabelCameraMirror();
+}
+function resizeLabelCameraOverlay(){
+  const canvas=$('labelCameraOverlay'); if(!canvas)return null;
+  const rect=canvas.getBoundingClientRect(),dpr=Math.max(1,window.devicePixelRatio||1);
+  const w=Math.max(1,Math.round(rect.width*dpr)),h=Math.max(1,Math.round(rect.height*dpr));
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+  return canvas;
+}
+function smoothPath(ctx,pts){if(pts.length<2)return;ctx.moveTo(pts[0].x,pts[0].y);for(let i=0;i<pts.length-1;i++){const p=pts[i],n=pts[i+1],mx=(p.x+n.x)/2,my=(p.y+n.y)/2;ctx.quadraticCurveTo(p.x,p.y,mx,my);}const lp=pts[pts.length-1];ctx.lineTo(lp.x,lp.y);}
+function updateLabelCameraUi(){
+  const s=labelCameraGuideState;if(!s)return;
+  const status=$('labelCameraAlignStatus'),help=$('labelCameraInstructionText');
+  if(help)help.textContent=s.prevStrip?'Match the ghosted strip from the previous capture. Auto Capture will trigger when overlap looks good, or you can tap the shutter yourself.':'Set your curved guide, then take the first narrow label photo.';
+  if(!status)return;
+  status.className='label-camera-align-status';
+  if(!s.prevStrip){status.textContent='Manual capture for the first shot.';return;}
+  const pct=Math.round(s.alignScore*100);
+  if(s.matchFrames>10){status.classList.add('capture');status.textContent=`Overlap locked · auto capturing (${pct}%)`;return;}
+  if(s.alignScore>.79){status.classList.add('good');status.textContent=`Good overlap detected · ${pct}% match`;return;}
+  if(s.alignScore>.62){status.classList.add('ready');status.textContent=`Getting close · ${pct}% match`;return;}
+  status.textContent=`Rotate until the ghost strip lines up · ${pct}% match`;
+}
+function drawLabelCameraOverlay(){
+  const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
+  const ctx=canvas.getContext('2d'),rect=getLabelCameraGuideRect(canvas); ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(s.prevStrip){ const ghostW=rect.w*.18,ghostH=rect.h*.70,gx=rect.x+8,gy=rect.y+(rect.h-ghostH)/2; ctx.save(); ctx.globalAlpha=.42; ctx.drawImage(s.prevStrip.preview,gx,gy,ghostW,ghostH); ctx.restore(); ctx.save(); ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.setLineDash([10,8]); ctx.strokeRect(gx,gy,ghostW,ghostH); ctx.restore(); }
+  const topPts=s.points.top.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
+  const botPts=s.points.bottom.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
+  ctx.save(); ctx.fillStyle='rgba(53,207,255,.05)'; ctx.strokeStyle='rgba(83,225,255,.95)'; ctx.lineWidth=Math.max(2,canvas.width*.0018); ctx.shadowColor='rgba(53,207,255,.45)'; ctx.shadowBlur=16; ctx.beginPath(); smoothPath(ctx,topPts); for(let i=botPts.length-1;i>=0;i--){const p=botPts[i]; if(i===botPts.length-1) ctx.lineTo(p.x,p.y); else {const prev=botPts[i+1],mx=(prev.x+p.x)/2,my=(prev.y+p.y)/2; ctx.quadraticCurveTo(prev.x,prev.y,mx,my);} } ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=rect.x+rect.w*.5; ctx.beginPath(); ctx.moveTo(cx,rect.y+rect.h*.08); ctx.lineTo(cx,rect.y+rect.h*.92); ctx.stroke(); ctx.restore();
+  const editable=new Set(getLabelCameraEditableRefs().map(ref=>`${ref.row}:${ref.i}`));
+  [...s.points.top.map((p,i)=>({row:'top',i,p})),...s.points.bottom.map((p,i)=>({row:'bottom',i,p}))].forEach(ref=>{ const x=rect.x+ref.p.x*rect.w,y=rect.y+ref.p.y*rect.h,active=editable.has(`${ref.row}:${ref.i}`),r=active?Math.max(8,canvas.width*.006):Math.max(6,canvas.width*.0048); ctx.beginPath(); ctx.fillStyle=active?'#6fb5ff':'#7e8ca5'; if(ref.i===0||ref.i===4) ctx.fillStyle='#ff73ee'; if(ref.i===2) ctx.fillStyle=active?'#9fe7ff':'#7e8ca5'; ctx.shadowColor='rgba(255,79,227,.30)'; ctx.shadowBlur=active?10:0; ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.lineWidth=active?2:1.2; ctx.strokeStyle=active?'rgba(235,247,255,.95)':'rgba(255,255,255,.35)'; ctx.stroke(); });
+  if(s.prevStrip){ ctx.save(); ctx.font=`${Math.max(12,canvas.width*.011)}px system-ui, sans-serif`; ctx.fillStyle='rgba(230,244,255,.92)'; ctx.fillText('Ghosted overlap',rect.x+12,rect.y+rect.h*.20); ctx.restore(); }
+  updateLabelCameraUi();
+}
+function stopLabelCameraLoop(){if(labelCameraRaf){cancelAnimationFrame(labelCameraRaf);labelCameraRaf=0;}}
+function downsampleLumaFromCanvas(srcCanvas,sx,sy,sw,sh,w=40,h=96){ const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.drawImage(srcCanvas,sx,sy,sw,sh,0,0,w,h); const d=ctx.getImageData(0,0,w,h).data; const out=new Uint8Array(w*h); for(let i=0,j=0;i<d.length;i+=4,j++) out[j]=Math.round(.2126*d[i]+.7152*d[i+1]+.0722*d[i+2]); return {w,h,data:out,preview:c}; }
+function compareLumaSamples(a,b){ if(!a||!b||a.w!==b.w||a.h!==b.h)return 0; let diff=0; for(let i=0;i<a.data.length;i++) diff+=Math.abs(a.data[i]-b.data[i]); return clamp(1-(diff/(a.data.length*255)),0,1); }
+function sampleLabelCameraStrip(side='left'){
+  const video=$('labelCameraVideo'); if(!video?.videoWidth)return null; const sample=document.createElement('canvas'); sample.width=video.videoWidth; sample.height=video.videoHeight; const ctx=sample.getContext('2d',{willReadFrequently:true}); ctx.drawImage(video,0,0,sample.width,sample.height); const rect={x:sample.width*.10,y:sample.height*.11,w:sample.width*.80,h:sample.height*.74}; const sx=side==='left'?rect.x+rect.w*.02:rect.x+rect.w*.80, sy=rect.y+rect.h*.17, sw=rect.w*.16, sh=rect.h*.66; return downsampleLumaFromCanvas(sample,sx,sy,sw,sh,40,96);
+}
+function tickLabelCamera(){
+  drawLabelCameraOverlay(); const s=labelCameraGuideState;
+  if(s?.prevStrip){ const current=sampleLabelCameraStrip('left'); s.currentStrip=current; s.alignScore=compareLumaSamples(current,s.prevStrip); if(s.auto&&performance.now()-s.lastCaptureAt>1000&&s.alignScore>.81){ s.matchFrames++; if(s.matchFrames>10&&!labelCameraWorking) captureLabelCamera(true); } else s.matchFrames=0; updateLabelCameraUi(); }
+  labelCameraRaf=requestAnimationFrame(tickLabelCamera);
+}
+function resetLabelCameraGuide(){ labelCameraGuideState=defaultLabelCameraGuideState(); syncLabelCameraMirror(); updateLabelCameraUi(); drawLabelCameraOverlay(); }
+function labelCameraNearestRef(x,y){ const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return null; const rect=getLabelCameraGuideRect(canvas); let best=null,bd=Infinity; for(const ref of getLabelCameraEditableRefs()){ const p=labelCameraPointToPixel(ref,rect); const d=Math.hypot(p.x-x,p.y-y); if(d<bd){bd=d;best=ref;} } return bd<=28*(window.devicePixelRatio||1)?best:null; }
+function labelCameraPointerDown(ev){ const s=labelCameraGuideState,canvas=$('labelCameraOverlay'); if(!s||!canvas)return; const dpr=Math.max(1,window.devicePixelRatio||1); try{canvas.setPointerCapture(ev.pointerId);}catch{} const ref=labelCameraNearestRef(ev.offsetX*dpr,ev.offsetY*dpr); if(ref){ s.dragging={pointerId:ev.pointerId,ref}; ev.preventDefault(); } }
+function labelCameraPointerMove(ev){ const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas||!s.dragging||s.dragging.pointerId!==ev.pointerId)return; const dpr=Math.max(1,window.devicePixelRatio||1),rect=getLabelCameraGuideRect(canvas),nx=clamp((ev.offsetX*dpr-rect.x)/rect.w,0,1),ny=clamp((ev.offsetY*dpr-rect.y)/rect.h,0,1); setLabelCameraPoint(s.dragging.ref,nx,ny); drawLabelCameraOverlay(); ev.preventDefault(); }
+function labelCameraPointerEnd(ev){ const s=labelCameraGuideState,canvas=$('labelCameraOverlay'); if(!s||!canvas)return; if(s.dragging?.pointerId===ev.pointerId)s.dragging=null; try{canvas.releasePointerCapture(ev.pointerId);}catch{} }
 async function startLabelCamera(){
-  closeLabelAddDialog();stopHomeCameraBg();
-  if(!navigator.mediaDevices?.getUserMedia){const input=document.createElement('input');input.type='file';input.accept='image/*';input.capture='environment';input.onchange=()=>addLabelFiles(input.files||[]);input.click();return;}
+  closeLabelAddDialog(); stopHomeCameraBg();
+  if(!navigator.mediaDevices?.getUserMedia){ const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.capture='environment'; input.onchange=()=>addLabelFiles(input.files||[]); input.click(); return; }
   try{
     labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-    const video=$('labelCameraVideo');video.srcObject=labelCameraStream;await video.play().catch(()=>{});labelCameraSessionCount=0;$('labelCameraCount').textContent='0';$('labelCameraDialog').showModal();
-  }catch(err){console.warn(err);toast('Camera could not open. Choose Photos instead.');startHomeCameraBg();}
+    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
+  }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
-function stopLabelCamera(resumeAmbient=true){if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop());labelCameraStream=null;}const video=$('labelCameraVideo');if(video)video.srcObject=null;if($('labelCameraDialog')?.open)$('labelCameraDialog').close();if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg();}
-async function captureLabelCamera(){
-  const video=$('labelCameraVideo');if(!video?.videoWidth)return;const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(video.videoWidth,video.videoHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*scale));c.height=Math.max(1,Math.round(video.videoHeight*scale));c.getContext('2d').drawImage(video,0,0,c.width,c.height);const blob=await canvasBlob(c,'image/jpeg',.94);if(!blob)return;const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});addLabelFiles([file]);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);toast(`Photo ${labelCameraSessionCount} added.`);
+function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
+async function captureLabelCamera(fromAuto=false){
+  if(labelCameraWorking)return; labelCameraWorking=true;
+  try{
+    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(video.videoWidth,video.videoHeight)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(video.videoWidth*scale)); c.height=Math.max(1,Math.round(video.videoHeight*scale)); c.getContext('2d').drawImage(video,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.94); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); addLabelFiles([file]); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
+    if(labelCameraGuideState){ const strip=sampleLabelCameraStrip('right'); if(strip){ labelCameraGuideState.prevStrip=strip; labelCameraGuideState.alignScore=0; labelCameraGuideState.matchFrames=0; labelCameraGuideState.lastCaptureAt=performance.now(); } updateLabelCameraUi(); drawLabelCameraOverlay(); }
+    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} added.`);
+  }finally{ labelCameraWorking=false; }
 }
 function defaultLabelMesh(){
   const L=.14,R=.86,T=.16,B=.84;
@@ -1941,9 +2038,17 @@ $('labelPhotoInput')?.addEventListener('change',e=>{addLabelFiles(e.target.files
 $('labelReplaceInput')?.addEventListener('change',e=>{const file=e.target.files?.[0];e.target.value='';if(!file||!labelReplaceTargetId)return;const item=labelItemById(labelReplaceTargetId);labelReplaceTargetId=null;if(!item)return;revokeLabelItem(item);item.blob=file;item.url=URL.createObjectURL(file);item.name=file.name||item.name;item.quad=null;item.rotation=0;item.mapView={zoom:1,panX:0,panY:0};renderLabelBuilder();toast('Label image replaced.');});
 $('labelContinueBtn')?.addEventListener('pointerdown',burstCorrectButton);
 $('labelContinueBtn')?.addEventListener('click',startLabelAreaFlow);
-$('labelCameraCaptureBtn')?.addEventListener('click',captureLabelCamera);
+$('labelCameraCaptureBtn')?.addEventListener('click',()=>captureLabelCamera(false));
 $('labelCameraDoneBtn')?.addEventListener('click',stopLabelCamera);
 $('labelCameraCancelBtn')?.addEventListener('click',stopLabelCamera);
+$('labelCameraMirrorToggle')?.addEventListener('change',ev=>{if(!labelCameraGuideState)return;labelCameraGuideState.mirror=!!ev.target.checked;if(labelCameraGuideState.mirror)syncLabelCameraMirror();drawLabelCameraOverlay();});
+$('labelCameraAutoToggle')?.addEventListener('change',ev=>{if(!labelCameraGuideState)return;labelCameraGuideState.auto=!!ev.target.checked;updateLabelCameraUi();});
+$('labelCameraResetGuideBtn')?.addEventListener('click',()=>{const prev=labelCameraGuideState?.prevStrip||null;resetLabelCameraGuide();if(labelCameraGuideState)labelCameraGuideState.prevStrip=prev;drawLabelCameraOverlay();});
+$('labelCameraOverlay')?.addEventListener('pointerdown',labelCameraPointerDown);
+$('labelCameraOverlay')?.addEventListener('pointermove',labelCameraPointerMove);
+$('labelCameraOverlay')?.addEventListener('pointerup',labelCameraPointerEnd);
+$('labelCameraOverlay')?.addEventListener('pointercancel',labelCameraPointerEnd);
+window.addEventListener('resize',()=>{if($('labelCameraDialog')?.open)drawLabelCameraOverlay();});
 $('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();stopLabelCamera();});
 $('labelAreaBackBtn')?.addEventListener('click',()=>showView('label'));
 $('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){labelAreaPushHistory();item.quad=defaultLabelMesh();item.rotation=0;labelAreaSelectedIndex=-1;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();toast('Reset to the base 4-point mesh.');}});
@@ -2035,4 +2140,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.4', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.5', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

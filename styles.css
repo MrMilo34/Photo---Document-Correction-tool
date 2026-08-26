@@ -259,3 +259,26 @@ body.pdf-mode .pdf-save{display:block}
 .label-area-stage .zoom-chip{position:absolute;right:10px;top:10px;z-index:5}
 /* Final stitched-label mesh is a crop/framing check only. Mapping controls live on the source-image mapping screen. */
 #shapeView.label-mesh-mode .mesh-move-all,#shapeView.label-mesh-mode .label-rotation-panel{display:none!important}
+
+
+/* MeshDoctor v1.6.5 live panoramic label capture */
+.label-camera-view{position:relative;width:100%;height:calc(100dvh - 110px);display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000}
+.label-camera-view video{width:100%;height:100%;object-fit:cover}
+.label-camera-overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none;z-index:3}
+.label-camera-guide{position:absolute;inset:11% 10%;border:2px solid rgba(83,225,255,.80);border-radius:28px;box-shadow:0 0 0 999px rgba(0,0,0,.18),0 0 28px rgba(53,207,255,.18);pointer-events:none;z-index:1}
+.label-camera-guide:before,.label-camera-guide:after{content:"";position:absolute;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,rgba(255,79,227,.7),rgba(53,207,255,.9),transparent)}
+.label-camera-guide:before{top:11%}
+.label-camera-guide:after{bottom:11%}
+.label-camera-toolbar{position:absolute;top:14px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:8px;z-index:4}
+.label-camera-chip{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 12px;border-radius:999px;background:rgba(8,18,30,.82);border:1px solid rgba(87,217,255,.28);box-shadow:0 10px 24px rgba(0,0,0,.26),0 0 18px rgba(53,207,255,.08);color:#eff9ff;font-size:11px;font-weight:800;backdrop-filter:blur(10px)}
+.label-camera-chip input{accent-color:#35cfff;width:14px;height:14px;margin:0}
+.label-camera-chip.action{appearance:none;-webkit-appearance:none;cursor:pointer}
+.label-camera-chip.action:hover{border-color:rgba(87,217,255,.42)}
+.label-camera-instruction{position:absolute;left:14px;right:14px;bottom:138px;display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:16px;background:rgba(0,0,0,.52);border:1px solid rgba(87,217,255,.18);color:#eff7ff;z-index:4;backdrop-filter:blur(10px)}
+.label-camera-instruction strong{font-size:12px;letter-spacing:.01em}
+.label-camera-instruction span{font-size:10.5px;line-height:1.35;color:#d7e6f3}
+.label-camera-align-status{position:absolute;left:14px;right:14px;bottom:98px;min-height:34px;display:flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:13px;background:rgba(8,16,26,.80);border:1px solid rgba(87,217,255,.18);color:#98d7e8;font-size:11px;font-weight:700;text-align:center;z-index:4;backdrop-filter:blur(10px)}
+.label-camera-align-status.ready{color:#c8eeff;border-color:rgba(87,217,255,.34)}
+.label-camera-align-status.good{color:#7ff0ff;border-color:rgba(87,217,255,.46);box-shadow:0 0 18px rgba(53,207,255,.12)}
+.label-camera-align-status.capture{color:#f0fbff;border-color:rgba(255,79,227,.42);box-shadow:0 0 20px rgba(255,79,227,.12)}
+@media(min-width:800px){.label-camera-instruction,.label-camera-align-status{left:20px;right:20px}.label-camera-toolbar{left:20px;right:20px}}

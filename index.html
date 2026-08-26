@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.6.4" />
-  <link rel="icon" href="icons/icon-192.png?v=1.6.4" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.4" />
-  <link rel="stylesheet" href="styles.css?v=1.6.4" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.5" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.5" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.5" />
+  <link rel="stylesheet" href="styles.css?v=1.6.5" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.6.4" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.5" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.6.4</div>
+      <div class="version-tag">release v1.6.5</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -282,11 +282,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.6.4</h2>
+    <h2>MeshDoctor v1.6.5</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.4:</strong> label outputs now default to sequential names like <b>MeshDoctor-label 01</b>, <b>MeshDoctor-label 02</b>, and so on, with the counter advancing after each save. The label-mapping stage also continues to use the same 4-point then add-points workflow as the regular mesh editor.</p>
+    <p><strong>v1.6.5:</strong> Label Maker camera mode now includes a live mirrored-point panoramic capture guide with a <b>Mirror Points</b> option, previous-section ghost overlay, optional auto-capture alignment, and the sequential <b>MeshDoctor-label 01</b>, <b>MeshDoctor-label 02</b> style default naming introduced in the prior update.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -319,7 +319,21 @@
   </dialog>
 
   <dialog id="labelCameraDialog" class="label-camera-dialog">
-    <div class="label-camera-view"><video id="labelCameraVideo" autoplay playsinline muted></video><div class="label-camera-guide"><span>Keep the label inside the guide and overlap each photo with the previous one.</span></div></div>
+    <div class="label-camera-view">
+      <video id="labelCameraVideo" autoplay playsinline muted></video>
+      <canvas id="labelCameraOverlay" class="label-camera-overlay" aria-label="Live panoramic label guide"></canvas>
+      <div class="label-camera-guide" aria-hidden="true"></div>
+      <div class="label-camera-toolbar">
+        <label class="label-camera-chip"><input id="labelCameraMirrorToggle" type="checkbox" checked /> Mirror Points</label>
+        <label class="label-camera-chip"><input id="labelCameraAutoToggle" type="checkbox" checked /> Auto Capture</label>
+        <button id="labelCameraResetGuideBtn" class="label-camera-chip action" type="button">Reset Guide</button>
+      </div>
+      <div class="label-camera-instruction">
+        <strong>Panoramic photo mode</strong>
+        <span id="labelCameraInstructionText">Line the label up inside the curved guide. Match the ghosted strip from the previous photo, then rotate the bottle.</span>
+      </div>
+      <div id="labelCameraAlignStatus" class="label-camera-align-status">Manual capture for the first shot.</div>
+    </div>
     <div class="label-camera-controls">
       <button id="labelCameraCancelBtn" class="themed-secondary" type="button">Cancel</button>
       <button id="labelCameraCaptureBtn" class="camera-shutter" type="button" aria-label="Capture photo"><span></span></button>
@@ -336,8 +350,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.6.4"></script>
+  <script src="config.js?v=1.6.5"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.6.4"></script>
+  <script src="app.js?v=1.6.5"></script>
 </body>
 </html>
