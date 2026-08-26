@@ -13,13 +13,15 @@ function outputSize(width, height){
   return `${w}x${h}`;
 }
 
-function promptFor(mode){
+function promptFor(mode, hasReference=false){
   const common = [
     'MeshDoctor is a restoration and correction tool for user-supplied material. Perform a faithful restoration of the supplied image rather than creating a new scene.',
-    'Preserve the original meaning, context, composition, subjects, and content. Repair visual defects only where supported by the source image, and avoid inventing major new content.'
+    'Preserve the original meaning, context, composition, subjects, and content.',
+    'Repair visual defects using the source image, surrounding context, and any optional reference image. When parts are obscured by glare, reflections, or washout, make a conservative best-effort reconstruction of the same original content rather than inventing unrelated new content.'
   ];
+  const reference = hasReference ? 'A second user-supplied reference image of the same subject or page from another angle is provided. Use it only to recover missing or glare-covered detail while keeping the final result matched to the primary image composition.' : '';
   if(mode === 'document'){
-    return common.concat([
+    return common.concat([reference,
       'Restore this photographed, scanned, or digital document/page for readability, archival, educational, or professional use.',
       'The page may contain ordinary paperwork, school material, diagrams, scientific or anatomy textbook content, health information, forms, tables, signatures, logos, illustrations, labels, packaging, charts, classroom graphics, or technical material. Treat these as documentary content and preserve them faithfully.',
       'Reduce glare, reflections, shadows, haze, fading, stains, discoloration, folds, blur, noise, compression artifacts, and uneven lighting when possible.',
@@ -27,16 +29,19 @@ function promptFor(mode){
       'Preserve the source graphic design style. When a region is visibly a flat solid-color fill, such as a form field, spreadsheet cell, label, card, banner, background, or printed panel, keep that region a uniform solid color from edge to edge. Do not introduce gradients, painterly shading, texture, glow, or color variation into flat-color regions.',
       'If an icon, pictogram, illustration, logo, or photograph visibly contains gradients or shading in the source, preserve those gradients only within that element. Keep the surrounding labels, panels, borders, and background fills consistent with the original flat colors.',
       'For computer-generated or professionally printed pages, favor a clean screenshot/desktop-export appearance: crisp edges, consistent fills, neutral whites, even backgrounds, and faithful colors rather than a re-rendered artistic look.',
+      'When simple artwork, icons, pictograms, or educational poster illustrations are partially hidden by glare, reconstruct them in the same simple graphic style using nearby repeated patterns and any optional reference angle, while keeping flat-color label bars and backgrounds consistent.',
       'Do not rewrite, correct, infer, replace, remove, move, censor, or hallucinate document content. Do not redesign the page or change its color scheme.',
       'Return a cleaner and more legible version of the same document or page.'
     ]).join(' ');
   }
-  return common.concat([
+  return common.concat([reference,
     'Perform optical restoration of this user-supplied personal photograph or scanned printed photo for archival and memory-preservation purposes.',
+    'This includes ordinary family, couple, wedding, friendship, and memory-preservation photos where the goal is faithful cleanup of a real photo the user already owns or scanned.',
     'The requested edit is limited to correcting capture, print, and age-related defects such as glare, reflections, haze, washout, fading, color casts, stains, discoloration, dust, scratches, scan artifacts, blur, noise, compression artifacts, and uneven light exposure.',
     'Improve contrast, white balance, color balance, natural saturation, visibility, and fine detail while keeping the result believable and faithful to the original photograph.',
     'Preserve the same subjects, scene, pose, clothing, objects, background, lighting direction, camera angle, crop, composition, text, logos, and context. Treat any people shown as ordinary subjects in an archival photograph.',
     'Do not add, remove, replace, relocate, stylize, beautify, sexualize, intensify, or reinterpret any subject or interaction. Do not change expressions, clothing coverage, relationships, or the meaning of the scene.',
+    'If the primary image contains glare or reflections that hide small visual areas, use nearby context and any optional reference image to make a restrained best-effort recovery of the same underlying photo details.',
     'Make only restoration corrections that could reasonably result from better scanning, better lighting, or repair of the original print. Return a faithful restored version of the same photograph.'
   ]).join(' ');
 }
@@ -99,11 +104,12 @@ async function probeOpenAI(){
     return {ok:false,status:0,message:err?.message||'OpenAI probe failed',model:MODEL};
   }
 }
-function makeEditForm(decoded,resolvedMode,size,{minimal=false}={}){
+function makeEditForm(decoded,resolvedMode,size,{minimal=false,referenceDecoded=null}={}){
   const form=new FormData();
   form.append('model',MODEL);
   form.append('image[]',new Blob([decoded.bytes],{type:decoded.mime}),`meshdoctor-input.${decoded.ext}`);
-  form.append('prompt',promptFor(resolvedMode));
+  if(referenceDecoded) form.append('image[]',new Blob([referenceDecoded.bytes],{type:referenceDecoded.mime}),`meshdoctor-reference.${referenceDecoded.ext}`);
+  form.append('prompt',promptFor(resolvedMode, Boolean(referenceDecoded)));
   form.append('quality',QUALITY);
   if(!minimal){
     const outputFormat=resolvedMode==='document'?'png':'jpeg';
@@ -163,25 +169,27 @@ export default async function handler(req, res){
 
   try{
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const { image, mode = 'photo', width, height } = body;
+    const { image, referenceImage, mode = 'photo', width, height } = body;
     if(typeof image !== 'string') return res.status(400).json({ error: 'A base64 image data URL is required' });
     if(image.length > 20_000_000) return res.status(413).json({ error: 'Image payload is too large' });
 
     const decoded = decodeDataUrl(image);
     if(!decoded) return res.status(400).json({ error: 'Unsupported image data URL' });
+    const referenceDecoded = referenceImage ? decodeDataUrl(referenceImage) : null;
+    if(referenceImage && !referenceDecoded) return res.status(400).json({ error: 'Unsupported reference image data URL' });
 
     const resolvedMode = mode === 'document' ? 'document' : 'photo';
     const size = outputSize(width, height);
     let outputFormat = resolvedMode === 'document' ? 'png' : 'jpeg';
     let retriedMinimal=false;
 
-    let {response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size));
+    let {response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size,{referenceDecoded}));
     if(!aiResponse.ok){
       const firstError=safeOpenAIError(data,aiResponse.status,requestId);
       console.error('MeshDoctor OpenAI image edit failed',{stage:'primary',status:firstError.status,code:firstError.code,type:firstError.type,param:firstError.param,message:firstError.message,requestId:firstError.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,outputFormat});
       if(shouldRetryMinimal(firstError)){
         retriedMinimal=true;
-        ({response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size,{minimal:true})));
+        ({response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size,{minimal:true,referenceDecoded})));
         outputFormat='png';
       }
     }
@@ -191,7 +199,7 @@ export default async function handler(req, res){
       console.error('MeshDoctor OpenAI image edit failed',{stage:retriedMinimal?'minimal-retry':'primary',reason,status:error.status,code:error.code,type:error.type,param:error.param,message:error.message,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode});
       return res.status(aiResponse.status).json({
         error:error.message,
-        diagnostic:{stage:'openai',reason,status:error.status,code:error.code,type:error.type,param:error.param,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal}
+        diagnostic:{stage:'openai',reason,status:error.status,code:error.code,type:error.type,param:error.param,requestId:error.requestId,model:MODEL,quality:QUALITY,size,mode:resolvedMode,retriedMinimal,usedReference:Boolean(referenceDecoded)}
       });
     }
 
@@ -208,7 +216,8 @@ export default async function handler(req, res){
       mode: resolvedMode,
       size,
       requestId,
-      retriedMinimal
+      retriedMinimal,
+      usedReference: Boolean(referenceDecoded)
     });
   }catch(err){
     console.error('MeshDoctor AI error', err);
