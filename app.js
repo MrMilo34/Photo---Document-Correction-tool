@@ -38,6 +38,8 @@ let labelAreaIndex=0;
 let labelAreaBitmap=null;
 let labelAreaDragIndex=-1;
 let labelAreaDragStart=null;
+let labelAreaSelectedIndex=-1;
+let labelAreaHistory=[];
 let labelAreaZoom=1,labelAreaPanX=0,labelAreaPanY=0;
 let labelAreaGesture=null,labelAreaPinch=null,labelAreaPinched=false;
 const labelAreaPointers=new Map();
@@ -1617,15 +1619,63 @@ async function captureLabelCamera(){
   const video=$('labelCameraVideo');if(!video?.videoWidth)return;const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(video.videoWidth,video.videoHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*scale));c.height=Math.max(1,Math.round(video.videoHeight*scale));c.getContext('2d').drawImage(video,0,0,c.width,c.height);const blob=await canvasBlob(c,'image/jpeg',.94);if(!blob)return;const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});addLabelFiles([file]);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);toast(`Photo ${labelCameraSessionCount} added.`);
 }
 function defaultLabelMesh(){
-  const L=.05,R=.95,T=.08,B=.92;
+  const L=.14,R=.86,T=.16,B=.84;
   return [
-    {x:L,y:T,corner:0},{x:L+(R-L)*.25,y:T},{x:L+(R-L)*.50,y:T},{x:L+(R-L)*.75,y:T},{x:R,y:T,corner:1},
-    {x:R,y:(T+B)/2},
-    {x:R,y:B,corner:2},{x:L+(R-L)*.75,y:B},{x:L+(R-L)*.50,y:B},{x:L+(R-L)*.25,y:B},{x:L,y:B,corner:3},
-    {x:L,y:(T+B)/2}
+    {x:L,y:T,corner:0},
+    {x:R,y:T,corner:1},
+    {x:R,y:B,corner:2},
+    {x:L,y:B,corner:3}
   ];
 }
-function cloneQuad(q){return q.map(p=>({...p}));}
+function cloneLabelMesh(q){return (q||[]).map(p=>({...p}));}
+function cloneQuad(q){return cloneLabelMesh(q);}
+
+function labelAreaPushHistory(){
+  const item=labelItems[labelAreaIndex];
+  if(!item?.quad)return;
+  labelAreaHistory.push({quad:cloneLabelMesh(item.quad),rotation:Number(item.rotation)||0});
+  if(labelAreaHistory.length>48)labelAreaHistory.shift();
+}
+function labelAreaUndo(){
+  const item=labelItems[labelAreaIndex],prev=labelAreaHistory.pop();
+  if(!item||!prev){toast('Nothing to undo.');return;}
+  item.quad=cloneLabelMesh(prev.quad); item.rotation=Number(prev.rotation)||0; labelAreaSelectedIndex=-1;
+  const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');
+  if(slider)slider.value=String(item.rotation||0); if(out)out.textContent=`${(item.rotation||0).toFixed(1)}°`;
+  drawLabelArea();
+}
+function labelAreaNearestPoint(pos,q,radiusCss=48){
+  let best=-1,bd=Infinity;
+  q.forEach((pt,i)=>{const d=Math.hypot((pt.x-pos.x)*pos.cssW,(pt.y-pos.y)*pos.cssH); if(d<bd){bd=d; best=i;}});
+  return bd<=radiusCss?best:-1;
+}
+function labelAreaNearestEdge(pos,q){
+  let best={d:Infinity,i:-1,x:pos.x,y:pos.y};
+  const px={x:pos.x,y:pos.y};
+  for(let i=0;i<q.length;i++){
+    const a=q[i],b=q[(i+1)%q.length];
+    const r=pointSegDistance(px,a,b),dx=(r.x-pos.x)*pos.cssW,dy=(r.y-pos.y)*pos.cssH,d=Math.hypot(dx,dy);
+    if(d<best.d)best={d,i,x:r.x,y:r.y};
+  }
+  return best;
+}
+function addLabelAreaPointAt(pos){
+  const item=labelItems[labelAreaIndex]; if(!item)return false;
+  const q=item.quad||defaultLabelMesh();
+  const existing=labelAreaNearestPoint(pos,q,54);
+  if(existing>=0){labelAreaSelectedIndex=existing; drawLabelArea(); return true;}
+  const best=labelAreaNearestEdge(pos,q), threshold=Math.max(34,Math.min(pos.cssW,pos.cssH)*.08);
+  if(best.i<0||best.d>threshold){labelAreaSelectedIndex=-1; drawLabelArea(); toast('Tap the blue perimeter to add a point.'); return false;}
+  labelAreaPushHistory();
+  const np={x:clamp(best.x,0,1),y:clamp(best.y,0,1)};
+  item.quad=[...q.slice(0,best.i+1),np,...q.slice(best.i+1)];
+  labelAreaSelectedIndex=best.i+1; drawLabelArea(); return true;
+}
+function removeSelectedLabelAreaPoint(){
+  const item=labelItems[labelAreaIndex]; if(!item?.quad||labelAreaSelectedIndex<0||!item.quad[labelAreaSelectedIndex]){toast('Select a blue point first.');return;}
+  if(item.quad[labelAreaSelectedIndex].corner!==undefined){toast('The four corner points stay fixed.');return;}
+  labelAreaPushHistory(); item.quad.splice(labelAreaSelectedIndex,1); labelAreaSelectedIndex=-1; drawLabelArea();
+}
 function labelAreaCenter(q){return{x:q.reduce((s,p)=>s+p.x,0)/q.length,y:q.reduce((s,p)=>s+p.y,0)/q.length};}
 function labelAreaDrawSource(ctx,canvas,bmp,rotation=0){
   ctx.save();ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate((Number(rotation)||0)*Math.PI/180);ctx.drawImage(bmp,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);ctx.restore();
@@ -1646,7 +1696,7 @@ function clampLabelAreaPan(){
 async function renderLabelArea(){
   if(!labelItems.length){showView('label');return;}
   labelAreaIndex=clamp(labelAreaIndex,0,labelItems.length-1);const item=labelItems[labelAreaIndex];if(!item.quad)item.quad=defaultLabelMesh();if(!Number.isFinite(item.rotation))item.rotation=0;if(!item.mapView)item.mapView={zoom:1,panX:0,panY:0};
-  resetLabelAreaGesture();
+  labelAreaSelectedIndex=-1; labelAreaHistory=[]; resetLabelAreaGesture();
   try{labelAreaBitmap?.close?.();}catch{}
   labelAreaBitmap=await createImageBitmap(item.blob);const maxEdge=1500,scale=Math.min(1,maxEdge/Math.max(labelAreaBitmap.width,labelAreaBitmap.height));const canvas=$('labelAreaCanvas');canvas.width=Math.max(1,Math.round(labelAreaBitmap.width*scale));canvas.height=Math.max(1,Math.round(labelAreaBitmap.height*scale));
   labelAreaZoom=clamp(Number(item.mapView.zoom)||1,1,LABEL_AREA_MAX_ZOOM);labelAreaPanX=Number(item.mapView.panX)||0;labelAreaPanY=Number(item.mapView.panY)||0;
@@ -1661,7 +1711,11 @@ function drawLabelArea(){
   ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();labelAreaDrawSource(ctx,canvas,labelAreaBitmap,item.rotation||0);ctx.restore();
   const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);grad.addColorStop(0,'#35cfff');grad.addColorStop(.5,'#697dff');grad.addColorStop(1,'#ff4fe3');
   ctx.strokeStyle=grad;ctx.lineWidth=Math.max(2,canvas.width/420);ctx.shadowBlur=12;ctx.shadowColor='#35cfff';ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.stroke();ctx.shadowBlur=0;
-  q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,r=Math.max(7,canvas.width/105);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=p.corner!==undefined?'#ff4fe3':'#6987ff';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/650);ctx.strokeStyle='#fff';ctx.stroke();});
+  const r=Math.max(7,canvas.width/105);
+  q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,isSel=i===labelAreaSelectedIndex,base=p.corner!==undefined?r*1.08:r;
+    if(isSel){ctx.beginPath();ctx.arc(x,y,base+r*.62,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.14)';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/800);ctx.strokeStyle='rgba(255,255,255,.9)';ctx.stroke();}
+    ctx.beginPath();ctx.arc(x,y,base,0,Math.PI*2);ctx.fillStyle=p.corner!==undefined?'#ff4fe3':'#6987ff';ctx.fill();ctx.lineWidth=Math.max(2,canvas.width/650);ctx.strokeStyle='#fff';ctx.stroke();
+  });
   const center=labelAreaCenter(q),cx=center.x*canvas.width,cy=center.y*canvas.height,rr=Math.max(23,canvas.width/35);
   ctx.save();ctx.shadowBlur=18;ctx.shadowColor='rgba(53,207,255,.34)';ctx.fillStyle='rgba(8,22,34,.92)';ctx.strokeStyle='rgba(87,217,255,.88)';ctx.lineWidth=Math.max(2,canvas.width/600);ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
   ctx.strokeStyle='#bff4ff';ctx.lineWidth=Math.max(2.2,canvas.width/520);ctx.lineCap='round';ctx.lineJoin='round';const arm=rr*.52,tip=rr*.22;
@@ -1671,20 +1725,43 @@ function labelAreaPointerPos(ev){const c=$('labelAreaCanvas'),r=c.getBoundingCli
 function startLabelAreaPinch(){const ps=[...labelAreaPointers.values()];if(ps.length<2)return;const a=ps[0],b=ps[1],mid=midpoint(a,b);labelAreaPinch={distance:Math.max(1,screenDistance(a,b)),zoom:labelAreaZoom,panX:labelAreaPanX,panY:labelAreaPanY,mid};labelAreaPinched=true;labelAreaGesture=null;labelAreaDragIndex=-1;labelAreaDragStart=null;}
 function handleLabelAreaPinch(){if(!labelAreaPinch||labelAreaPointers.size<2)return;const ps=[...labelAreaPointers.values()],a=ps[0],b=ps[1],dist=Math.max(1,screenDistance(a,b)),mid=midpoint(a,b),newZoom=clamp(labelAreaPinch.zoom*(dist/labelAreaPinch.distance),1,LABEL_AREA_MAX_ZOOM),factor=newZoom/labelAreaPinch.zoom,stage=$('labelAreaStage').getBoundingClientRect(),cx=stage.left+stage.width/2,cy=stage.top+stage.height/2;labelAreaPanX=(mid.x-cx)-factor*(labelAreaPinch.mid.x-cx-labelAreaPinch.panX);labelAreaPanY=(mid.y-cy)-factor*(labelAreaPinch.mid.y-cy-labelAreaPinch.panY);labelAreaZoom=newZoom;clampLabelAreaPan();applyLabelAreaViewport(true);}
 function labelAreaPointerDown(ev){
-  const item=labelItems[labelAreaIndex];if(!item)return;ev.preventDefault();try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPointers.size>=2){startLabelAreaPinch();return;}
+  const item=labelItems[labelAreaIndex];if(!item)return;ev.preventDefault();try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}
+  labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPointers.size>=2){startLabelAreaPinch();return;}
   const p=labelAreaPointerPos(ev),q=item.quad||defaultLabelMesh(),center=labelAreaCenter(q),centerDist=Math.hypot((center.x-p.x)*p.cssW,(center.y-p.y)*p.cssH);
-  if(centerDist<=44){labelAreaDragIndex=-2;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q)};return;}
-  let best=-1,dist=1e9;q.forEach((pt,i)=>{const d=Math.hypot((pt.x-p.x)*p.cssW,(pt.y-p.y)*p.cssH);if(d<dist){dist=d;best=i;}});
-  if(dist<=52){labelAreaDragIndex=best;labelAreaDragStart={pointerId:ev.pointerId};return;}
-  labelAreaGesture={type:'pan',pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,panX:labelAreaPanX,panY:labelAreaPanY};
+  if(centerDist<=44){labelAreaSelectedIndex=-1;labelAreaDragIndex=-2;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q)};drawLabelArea();return;}
+  const idx=labelAreaNearestPoint(p,q,52);
+  if(idx>=0){labelAreaSelectedIndex=idx;labelAreaDragIndex=idx;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q),historySaved:false,moved:false};drawLabelArea();return;}
+  const edge=labelAreaNearestEdge(p,q),threshold=Math.max(34,Math.min(p.cssW,p.cssH)*.08);
+  labelAreaSelectedIndex=-1;drawLabelArea();
+  labelAreaGesture={type:'blank',pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,panX:labelAreaPanX,panY:labelAreaPanY,downPos:p,moved:false,edgeOkay:edge.i>=0&&edge.d<=threshold};
 }
 function labelAreaPointerMove(ev){
   if(labelAreaPointers.has(ev.pointerId))labelAreaPointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});if(labelAreaPinched&&labelAreaPointers.size>=2){ev.preventDefault();handleLabelAreaPinch();return;}
   const item=labelItems[labelAreaIndex];if(!item)return;
-  if(labelAreaDragIndex!==-1){const p=labelAreaPointerPos(ev);if(labelAreaDragIndex===-2&&labelAreaDragStart?.quad){const origin=labelAreaDragStart.quad,dx0=p.x-labelAreaDragStart.start.x,dy0=p.y-labelAreaDragStart.start.y,minX=Math.min(...origin.map(q=>q.x)),maxX=Math.max(...origin.map(q=>q.x)),minY=Math.min(...origin.map(q=>q.y)),maxY=Math.max(...origin.map(q=>q.y)),dx=clamp(dx0,-minX,1-maxX),dy=clamp(dy0,-minY,1-maxY);item.quad=origin.map(q=>({...q,x:q.x+dx,y:q.y+dy}));}else if(labelAreaDragIndex>=0){item.quad[labelAreaDragIndex]={...item.quad[labelAreaDragIndex],x:p.x,y:p.y};}drawLabelArea();ev.preventDefault();return;}
-  if(labelAreaGesture?.pointerId===ev.pointerId){labelAreaPanX=labelAreaGesture.panX+(ev.clientX-labelAreaGesture.startX);labelAreaPanY=labelAreaGesture.panY+(ev.clientY-labelAreaGesture.startY);clampLabelAreaPan();applyLabelAreaViewport(false);ev.preventDefault();}
+  if(labelAreaDragIndex!==-1){const p=labelAreaPointerPos(ev);
+    if(labelAreaDragIndex===-2&&labelAreaDragStart?.quad){
+      if(!labelAreaDragStart.historySaved){labelAreaPushHistory();labelAreaDragStart.historySaved=true;}
+      const origin=labelAreaDragStart.quad,dx0=p.x-labelAreaDragStart.start.x,dy0=p.y-labelAreaDragStart.start.y,minX=Math.min(...origin.map(q=>q.x)),maxX=Math.max(...origin.map(q=>q.x)),minY=Math.min(...origin.map(q=>q.y)),maxY=Math.max(...origin.map(q=>q.y)),dx=clamp(dx0,-minX,1-maxX),dy=clamp(dy0,-minY,1-maxY);item.quad=origin.map(q=>({...q,x:q.x+dx,y:q.y+dy}));
+    }else if(labelAreaDragIndex>=0){
+      const moved=Math.hypot((p.x-labelAreaDragStart.start.x)*p.cssW,(p.y-labelAreaDragStart.start.y)*p.cssH);
+      if(moved>3&&!labelAreaDragStart.historySaved){labelAreaPushHistory();labelAreaDragStart.historySaved=true;}
+      item.quad[labelAreaDragIndex]={...item.quad[labelAreaDragIndex],x:clamp(p.x,0,1),y:clamp(p.y,0,1)};
+    }
+    drawLabelArea();ev.preventDefault();return;
+  }
+  if(labelAreaGesture?.pointerId===ev.pointerId){const dist=Math.hypot(ev.clientX-labelAreaGesture.startX,ev.clientY-labelAreaGesture.startY);if(dist>7)labelAreaGesture.moved=true;if(labelAreaGesture.moved){labelAreaPanX=labelAreaGesture.panX+(ev.clientX-labelAreaGesture.startX);labelAreaPanY=labelAreaGesture.panY+(ev.clientY-labelAreaGesture.startY);clampLabelAreaPan();applyLabelAreaViewport(false);}ev.preventDefault();}
 }
-function labelAreaPointerEnd(ev){labelAreaPointers.delete(ev.pointerId);if(labelAreaPinched){if(labelAreaPointers.size===0){labelAreaPinched=false;labelAreaPinch=null;saveCurrentLabelMapView();applyLabelAreaViewport(true);}return;}labelAreaDragIndex=-1;labelAreaDragStart=null;labelAreaGesture=null;saveCurrentLabelMapView();try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
+function labelAreaPointerEnd(ev){
+  labelAreaPointers.delete(ev.pointerId);
+  if(labelAreaPinched){if(labelAreaPointers.size===0){labelAreaPinched=false;labelAreaPinch=null;saveCurrentLabelMapView();applyLabelAreaViewport(true);}return;}
+  if(labelAreaDragIndex!==-1){labelAreaDragIndex=-1;labelAreaDragStart=null;saveCurrentLabelMapView();try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();return;}
+  if(labelAreaGesture?.pointerId===ev.pointerId){
+    const g=labelAreaGesture;labelAreaGesture=null;
+    if(!g.moved&&g.edgeOkay){addLabelAreaPointAt(g.downPos);} else saveCurrentLabelMapView();
+    try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();return;
+  }
+  labelAreaDragStart=null; saveCurrentLabelMapView(); try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{} ev.preventDefault();
+}
 async function startLabelAreaFlow(){if(!labelItems.length){toast('Add label images first.');return;}labelAreaIndex=0;showView('labelArea');await renderLabelArea();}
 async function labelAreaNext(){saveCurrentLabelMapView();if(labelAreaIndex<labelItems.length-1){labelAreaIndex++;await renderLabelArea();}else await buildLabelResult();}
 async function labelAreaPrevious(){saveCurrentLabelMapView();if(labelAreaIndex>0){labelAreaIndex--;await renderLabelArea();}}
@@ -1702,50 +1779,49 @@ function coonsPoint(mesh,u,v){
 async function warpLabelItem(item,targetH=900){
   const bmp=await createImageBitmap(item.blob);
   try{
-    const maxSrc=1900,srcScale=Math.min(1,maxSrc/Math.max(bmp.width,bmp.height)),sw=Math.max(1,Math.round(bmp.width*srcScale)),sh=Math.max(1,Math.round(bmp.height*srcScale));
-    const sc=document.createElement('canvas');sc.width=sw;sc.height=sh;const sx=sc.getContext('2d',{willReadFrequently:true});sx.save();sx.translate(sw/2,sh/2);sx.rotate((Number(item.rotation)||0)*Math.PI/180);sx.drawImage(bmp,-sw/2,-sh/2,sw,sh);sx.restore();
-    const sd=sx.getImageData(0,0,sw,sh).data,q=(item.quad||defaultLabelMesh()).map(p=>({...p,x:p.x*sw,y:p.y*sh}));
-    const top=[q[0],q[1],q[2],q[3],q[4]],bottom=[q[10],q[9],q[8],q[7],q[6]],left=[q[0],q[11],q[10]],right=[q[4],q[5],q[6]];
-    const chainLen=a=>a.slice(1).reduce((s,p,i)=>s+Math.hypot(p.x-a[i].x,p.y-a[i].y),0),ratio=((chainLen(top)+chainLen(bottom))/2)/Math.max(1,(chainLen(left)+chainLen(right))/2);
-    const H=Math.max(420,Math.min(1000,targetH)),W=Math.max(260,Math.min(2100,Math.round(H*ratio))),out=document.createElement('canvas');out.width=W;out.height=H;const ox=out.getContext('2d'),img=ox.createImageData(W,H),od=img.data;let oi=0;
-    for(let y=0;y<H;y++){const v=y/Math.max(1,H-1);for(let x=0;x<W;x++){const u=x/Math.max(1,W-1),pp=coonsPoint(q,u,v);let px=clamp(pp.x,0,sw-1.001),py=clamp(pp.y,0,sh-1.001);const x0=px|0,y0=py|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=px-x0,fy=py-y0,i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;}od[oi+3]=255;oi+=4;}}
-    ox.putImageData(img,0,0);return out;
-  }finally{bmp.close?.();}
-}
-function labelMatchGrid(canvas,targetH=96){
-  const scale=Math.min(1,targetH/canvas.height),w=Math.max(24,Math.round(canvas.width*scale)),h=Math.max(24,Math.round(canvas.height*scale)),c=document.createElement('canvas');c.width=w;c.height=h;const cx=c.getContext('2d',{willReadFrequently:true});cx.drawImage(canvas,0,0,w,h);const d=cx.getImageData(0,0,w,h).data,g=new Float32Array(w*h),gx=new Float32Array(w*h),gy=new Float32Array(w*h);
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x,p=i*4;g[i]=.299*d[p]+.587*d[p+1]+.114*d[p+2];}
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x;gx[i]=g[i]-g[y*w+Math.max(0,x-1)];gy[i]=g[i]-g[Math.max(0,y-1)*w+x];}
-  return{w,h,g,gx,gy,scale};
-}
-function estimateLabelAlignment(a,b){
-  const A=labelMatchGrid(a),B=labelMatchGrid(b),minW=Math.min(A.w,B.w),minO=Math.max(10,Math.round(minW*.08)),maxO=Math.max(minO+2,Math.round(minW*.76));let best={score:Infinity,o:minO,dy:0},second=Infinity;
-  for(let o=minO;o<=maxO;o+=2){
-    for(let dy=-7;dy<=7;dy++){
-      let meanDiff=0,mn=0;
-      for(let y=4;y<Math.min(A.h,B.h)-4;y+=5){const by=y+dy;if(by<2||by>=B.h-2)continue;for(let x=2;x<o-2;x+=5){const ai=y*A.w+(A.w-o+x),bi=by*B.w+x;meanDiff+=A.g[ai]-B.g[bi];mn++;}}
-      meanDiff/=Math.max(1,mn);let score=0,n=0;
-      for(let y=3;y<Math.min(A.h,B.h)-3;y+=3){const by=y+dy;if(by<2||by>=B.h-2)continue;for(let x=2;x<o-2;x+=3){const ai=y*A.w+(A.w-o+x),bi=by*B.w+x,edge=Math.abs(A.gx[ai]-B.gx[bi])+Math.abs(A.gy[ai]-B.gy[bi]),tone=Math.abs((A.g[ai]-B.g[bi])-meanDiff);score+=edge*.72+tone*.28;n++;}}
-      score/=Math.max(1,n);
-      // Very tiny overlaps often match by accident; give useful overlap a small preference without forcing it.
-      score*=1.03-Math.min(.03,(o/minW)*.035);
-      if(score<best.score){second=best.score;best={score,o,dy};}else if(score<second)second=score;
+    const src=document.createElement('canvas'),s=src.getContext('2d',{willReadFrequently:true}),sw=bmp.width,sh=bmp.height;
+    src.width=sw; src.height=sh; labelAreaDrawSource(s,src,bmp,item.rotation||0);
+    const q=(item.quad||defaultLabelMesh()).map(p=>({x:p.x*sw,y:p.y*sh,corner:p.corner}));
+    const top=getEdgePointsFromMesh(q,0,1), right=getEdgePointsFromMesh(q,1,2), bottom=getEdgePointsFromMesh(q,2,3), left=getEdgePointsFromMesh(q,3,0);
+    if([top,right,bottom,left].some(e=>e.length<2)) throw new Error('Invalid label mesh');
+    const rawW=Math.max(32,(polyLength(top)+polyLength(bottom))/2), rawH=Math.max(32,(polyLength(left)+polyLength(right))/2);
+    let H=Math.max(280,Math.round(targetH)), W=Math.max(160,Math.round(H*(rawW/rawH)));
+    const maxW=2400; if(W>maxW){const fit=maxW/W; W=Math.round(W*fit); H=Math.max(180,Math.round(H*fit));}
+    const out=document.createElement('canvas'); out.width=W; out.height=H; const o=out.getContext('2d',{willReadFrequently:true});
+    const img=s.getImageData(0,0,sw,sh),sd=img.data,im=o.createImageData(W,H),od=im.data;
+    const topX=new Float32Array(W),topY=new Float32Array(W),botX=new Float32Array(W),botY=new Float32Array(W);
+    const leftX=new Float32Array(H),leftY=new Float32Array(H),rightX=new Float32Array(H),rightY=new Float32Array(H);
+    for(let x=0;x<W;x++){const u=x/Math.max(1,W-1),a=samplePolylineNormalized(top,u),b=samplePolylineNormalized(bottom,1-u);topX[x]=a.x;topY[x]=a.y;botX[x]=b.x;botY[x]=b.y;}
+    for(let y=0;y<H;y++){const v=y/Math.max(1,H-1),l=samplePolylineNormalized(left,1-v),r=samplePolylineNormalized(right,v);leftX[y]=l.x;leftY[y]=l.y;rightX[y]=r.x;rightY[y]=r.y;}
+    const TL=q.find(p=>p.corner===0),TR=q.find(p=>p.corner===1),BR=q.find(p=>p.corner===2),BL=q.find(p=>p.corner===3);
+    let oi=0;
+    for(let y=0;y<H;y++){
+      const v=y/Math.max(1,H-1),lvx=leftX[y],lvy=leftY[y],rvx=rightX[y],rvy=rightY[y];
+      for(let x=0;x<W;x++){
+        const u=x/Math.max(1,W-1);
+        const bilx=(1-u)*(1-v)*TL.x+u*(1-v)*TR.x+(1-u)*v*BL.x+u*v*BR.x;
+        const bily=(1-u)*(1-v)*TL.y+u*(1-v)*TR.y+(1-u)*v*BL.y+u*v*BR.y;
+        let sx=(1-v)*topX[x]+v*botX[x]+(1-u)*lvx+u*rvx-bilx;
+        let sy=(1-v)*topY[x]+v*botY[x]+(1-u)*lvy+u*rvy-bily;
+        sx=clamp(sx,0,sw-1.001); sy=clamp(sy,0,sh-1.001);
+        const x0=sx|0,y0=sy|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=sx-x0,fy=sy-y0;
+        const i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;
+        for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;} od[oi+3]=255; oi+=4;
+      }
     }
-  }
-  const scaleX=a.width/A.w,scaleY=a.height/A.h,confidence=second<Infinity?clamp((second-best.score)/Math.max(1,second),0,1):0;
-  const fallback=Math.round(Math.min(a.width,b.width)*.14),overlap=(best.score>52&&confidence<.025)?fallback:Math.round(best.o*scaleX),yOffset=Math.round(best.dy*scaleY);
-  return{overlap:clamp(overlap,Math.round(Math.min(a.width,b.width)*.06),Math.round(Math.min(a.width,b.width)*.78)),yOffset,score:best.score,confidence};
+    o.putImageData(im,0,0); return out;
+  } finally { bmp.close?.(); }
 }
-async function stitchLabelPieces(pieces){
-  if(!pieces.length)throw new Error('No label pieces');
-  const aligns=[];for(let i=1;i<pieces.length;i++){await new Promise(r=>setTimeout(r,0));aligns.push(estimateLabelAlignment(pieces[i-1],pieces[i]));}
-  const xs=[0],ys=[0];for(let i=1;i<pieces.length;i++){const prev=pieces[i-1],a=aligns[i-1];xs[i]=xs[i-1]+prev.width-a.overlap;ys[i]=ys[i-1]+a.yOffset;}
-  const minY=Math.min(...ys),maxY=Math.max(...pieces.map((p,i)=>ys[i]+p.height)),totalW=Math.max(...pieces.map((p,i)=>xs[i]+p.width)),H=Math.max(1,maxY-minY),out=document.createElement('canvas');out.width=Math.max(1,totalW);out.height=H;const ctx=out.getContext('2d');
-  ctx.drawImage(pieces[0],xs[0],ys[0]-minY);
-  for(let i=1;i<pieces.length;i++){
-    const p=pieces[i],a=aligns[i-1],o=a.overlap,tmp=document.createElement('canvas');tmp.width=p.width;tmp.height=p.height;const tx=tmp.getContext('2d');tx.drawImage(p,0,0);tx.globalCompositeOperation='destination-in';const g=tx.createLinearGradient(0,0,p.width,0),stop=Math.min(.96,Math.max(.03,o/Math.max(1,p.width)));g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(Math.min(stop*.55,.92),'rgba(0,0,0,.35)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,p.width,p.height);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,xs[i],ys[i]-minY);
-  }
-  if(out.width>6144){const scaled=document.createElement('canvas'),f=6144/out.width;scaled.width=6144;scaled.height=Math.max(1,Math.round(out.height*f));scaled.getContext('2d').drawImage(out,0,0,scaled.width,scaled.height);return scaled;}return out;
+function getEdgePointsFromMesh(mesh,cornerA,cornerB){
+  const ia=mesh.findIndex(p=>p.corner===cornerA), ib=mesh.findIndex(p=>p.corner===cornerB); if(ia<0||ib<0)return [];
+  const out=[]; let i=ia; while(true){out.push(mesh[i]); if(i===ib)break; i=(i+1)%mesh.length; if(out.length>mesh.length+1)break;} return out;
+}
+function samplePolylineNormalized(ps,t){
+  if(ps.length===1)return ps[0]; const lens=[]; let total=0;
+  for(let i=1;i<ps.length;i++){const l=Math.hypot(ps[i].x-ps[i-1].x,ps[i].y-ps[i-1].y); lens.push(l); total+=l;}
+  if(total<1)return ps[0]; let target=t*total,acc=0;
+  for(let i=0;i<lens.length;i++){ if(target<=acc+lens[i]||i===lens.length-1){ const f=lens[i]?((target-acc)/lens[i]):0; return {x:ps[i].x+(ps[i+1].x-ps[i].x)*f,y:ps[i].y+(ps[i+1].y-ps[i].y)*f}; } acc+=lens[i]; }
+  return ps[ps.length-1];
 }
 async function buildLabelResult(){
   busy(true,'Preparing label sections…');
@@ -1847,16 +1923,21 @@ $('labelCameraDoneBtn')?.addEventListener('click',stopLabelCamera);
 $('labelCameraCancelBtn')?.addEventListener('click',stopLabelCamera);
 $('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();stopLabelCamera();});
 $('labelAreaBackBtn')?.addEventListener('click',()=>showView('label'));
-$('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){item.quad=defaultLabelMesh();item.rotation=0;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();toast('Label mapping reset.');}});
+$('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){labelAreaPushHistory();item.quad=defaultLabelMesh();item.rotation=0;labelAreaSelectedIndex=-1;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();toast('Reset to the base 4-point mesh.');}});
 $('labelApplyRemainingBtn')?.addEventListener('click',applyLabelAreaRemaining);
+$('labelAreaUndoBtn')?.addEventListener('click',labelAreaUndo);
+$('labelAreaRemovePointBtn')?.addEventListener('click',removeSelectedLabelAreaPoint);
 $('labelPrevBtn')?.addEventListener('click',labelAreaPrevious);
 $('labelNextBtn')?.addEventListener('click',labelAreaNext);
 $('labelAreaCanvas')?.addEventListener('pointerdown',labelAreaPointerDown);
 $('labelAreaCanvas')?.addEventListener('pointermove',labelAreaPointerMove);
 $('labelAreaCanvas')?.addEventListener('pointerup',labelAreaPointerEnd);
 $('labelAreaCanvas')?.addEventListener('pointercancel',labelAreaPointerEnd);
+$('labelAreaRotationSlider')?.addEventListener('pointerdown',()=>{const item=labelItems[labelAreaIndex];if(item&&!$('labelAreaRotationSlider').dataset.dragging){labelAreaPushHistory();$('labelAreaRotationSlider').dataset.dragging='1';}});
+$('labelAreaRotationSlider')?.addEventListener('pointerup',()=>{if($('labelAreaRotationSlider')) delete $('labelAreaRotationSlider').dataset.dragging;});
+$('labelAreaRotationSlider')?.addEventListener('pointercancel',()=>{if($('labelAreaRotationSlider')) delete $('labelAreaRotationSlider').dataset.dragging;});
 $('labelAreaRotationSlider')?.addEventListener('input',ev=>{const item=labelItems[labelAreaIndex];if(!item)return;item.rotation=clamp(Number(ev.target.value)||0,-10,10);const out=$('labelAreaRotationValue');if(out)out.textContent=`${item.rotation.toFixed(1)}°`;drawLabelArea();});
-$('labelAreaRotationResetBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(!item)return;item.rotation=0;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();});
+$('labelAreaRotationResetBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(!item)return;labelAreaPushHistory();item.rotation=0;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();});
 $('labelResultBackBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
 $('labelRebuildBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
 $('labelAiPolishBtn')?.addEventListener('click',aiPolishLabelResult);
