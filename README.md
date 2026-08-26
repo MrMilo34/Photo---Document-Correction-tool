@@ -1,30 +1,25 @@
-# MeshDoctor v1.6.1
+# MeshDoctor v1.6.2
 
-## What’s new in v1.6.1
-
-### Label Maker post-stitch editor
-- After **Stitch Label**, the stitched result now opens in the full MeshDoctor mesh editor instead of the old simple result-only screen.
-- The stitched label supports the same **pinch zoom** and **free panning** used by the normal photo/document mesh editor.
-- Label results start with a richer perimeter mesh. Individual points can be moved and additional perimeter points can still be added the normal MeshDoctor way.
-- A centered **4-way move control** lets the user reposition the entire mesh without moving every point separately.
-- Added a **Straighten** slider from -10° to +10° for fine rotation. Rotation keeps the original canvas size and does **not automatically zoom or crop the image**.
-- After mesh correction, Label Maker uses the normal result workflow: **Adjust, Grayscale, Corrected, and AI Assisted**.
-- Saving a corrected label still opens the naming dialog before the PNG is written to the MeshDoctor Images output folder / Downloads fallback.
-
-### Label source-area workflow
-- The four-point label selection used on each source photo now also has a centered **4-way move handle**. This makes it much easier to copy an area to the remaining images and nudge the whole selection left/right/up/down when the next photo is slightly offset.
-
-### Panoramic protection
-- Extra-wide stitched labels are preserved at full width. MeshDoctor avoids sending panoramas beyond the current whole-image AI ratio to a process that could resize/crop them; a local full-width polish is used instead.
+## What’s new in v1.6.2
+- **Label source mapping is now the place for alignment controls.** Each source image uses a multi-point neon perimeter mesh, pinch zoom, pan, a centered 4-way whole-mesh move control, and a ±10° Straighten slider.
+- The Straighten control rotates the source inside the existing frame; it does **not** auto-zoom or crop like some phone photo editors.
+- The source mesh uses top / bottom / side guide points to better follow curved containers. Those points are used during flattening with a curved-surface mapping pass rather than treating every label as a simple rectangle.
+- **Smarter overlap recognition** compares neighboring flattened sections using image luminance and edge features, searches a much larger overlap range, and also compensates for small vertical offsets before blending.
+- After stitching, MeshDoctor opens a separate **final perimeter-mesh check**. The whole-mesh move handle and Straighten bar are intentionally not shown there because they belong to source mapping.
+- The normal **Adjust / Grayscale / Corrected / AI Assisted** result editor follows the final mesh correction.
+- Extra-wide labels can now use **tiled AI document restoration**: MeshDoctor sends overlapping label sections to AI and blends the restored sections back into the original full-width panorama instead of resizing or cropping the entire label.
+- Fixed the **double naming prompt**. The Image name field on the result page is now the label filename; tapping Save PNG saves directly with that name.
 
 ## Label Maker workflow
-1. Add images from Camera or Photos.
-2. Reorder / replace / remove images.
-3. Select the visible label area on each source image.
-4. Stitch the label.
-5. Correct the stitched result with the full MeshDoctor mesh editor, optional Straighten rotation, zoom and pan.
-6. Continue to normal Adjust / Grayscale / Corrected / AI Assisted options.
-7. Name and save the final PNG.
+1. Add and reorder source photos.
+2. Map each source with the neon mesh, zoom/pan, whole-mesh move, and Straighten.
+3. MeshDoctor recognizes neighboring content and stitches the label.
+4. Check the stitched panorama with the final perimeter mesh.
+5. Correct the mesh and use the normal MeshDoctor Adjust / AI Assisted tools.
+6. Enter the Image name and Save PNG.
+
+## AI backend
+The secure endpoint remains `api/ai-correct.js`. Wide-label AI polishing is coordinated by the app using overlapping document-restoration tiles, so no new Vercel environment variables are required.
 
 ## Cache/version
-PWA cache key: `meshdoctor-v1.6.1`.
+PWA cache key: `meshdoctor-v1.6.2`.

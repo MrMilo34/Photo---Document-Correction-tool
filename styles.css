@@ -246,3 +246,16 @@ body.pdf-mode .pdf-save{display:block}
 #shapeView.label-mesh-mode .mesh-move-all{display:grid!important}
 #shapeView:not(.label-mesh-mode) .mesh-move-all,#shapeView:not(.label-mesh-mode) .label-rotation-panel{display:none!important}
 @media(min-width:800px){.label-rotation-panel{left:max(12px,calc((100vw - 900px)/2));right:max(12px,calc((100vw - 900px)/2));}}
+
+/* Label Maker v1.6.2 mapping controls */
+.label-area-stage{touch-action:none}
+#labelAreaCanvas{transform-origin:center center;will-change:transform;touch-action:none}
+.label-map-rotation{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.label-map-rotation input[type="range"]{width:100%;accent-color:#ff4fe3}
+.label-map-rotation .label-rotation-head{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center}
+.label-map-rotation .label-rotation-head span{font-size:11px;font-weight:800;color:#e8f4ff}
+.label-map-rotation .label-rotation-head output{font-size:11px;font-weight:800;color:#66ddff}
+.label-map-rotation .label-rotation-head button{min-height:34px;padding:0 10px;border-radius:11px;background:rgba(20,31,44,.9);border:1px solid rgba(87,217,255,.16);color:#dcecf8;font-weight:800}
+.label-area-stage .zoom-chip{position:absolute;right:10px;top:10px;z-index:5}
+/* Final stitched-label mesh is a crop/framing check only. Mapping controls live on the source-image mapping screen. */
+#shapeView.label-mesh-mode .mesh-move-all,#shapeView.label-mesh-mode .label-rotation-panel{display:none!important}
