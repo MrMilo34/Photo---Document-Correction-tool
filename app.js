@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const views = { home: $('homeView'), label: $('labelView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
+const views = { home: $('homeView'), label: $('labelView'), labelArea: $('labelAreaView'), labelResult: $('labelResultView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
 const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
@@ -26,6 +26,21 @@ let pdfSuppressClickUntil = 0;
 const SETTINGS_KEY = 'meshdoctor-settings-v1';
 let userSettings = { pdfFilename:'MeshDoctor-created', outputFolderName:'Downloads' };
 let outputDirHandle = null;
+
+// Label Maker state
+let labelItems=[];
+let labelUid=0;
+let labelSelectedId=null;
+let labelDrag=null;
+let labelSuppressClickUntil=0;
+let labelReplaceTargetId=null;
+let labelAreaIndex=0;
+let labelAreaBitmap=null;
+let labelAreaDragIndex=-1;
+let labelResultImage=null;
+let labelCameraStream=null;
+let labelCameraSessionCount=0;
+let fileNameResolve=null;
 
 
 let points = [];
@@ -313,6 +328,7 @@ function showView(name){
   else stopHomeCameraBg();
   if(name==='result') updateResultActions();
   if(name==='pdf') renderPdfBuilder();
+  if(name==='label') renderLabelBuilder();
   window.scrollTo(0,0);
 }
 function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
@@ -1449,14 +1465,112 @@ function buildImagePdf(pages){
   xref+=`trailer\n<< /Size ${maxId+1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
   parts.push(asciiBytes(xref));return new Blob(parts,{type:'application/pdf'});
 }
-async function savePdf(){
+
+function makeLabelItem(file){
+  return {id:`LBL-${Date.now().toString(36)}-${(++labelUid).toString(36)}`,name:file.name||`Label-${labelUid}.jpg`,blob:file,url:URL.createObjectURL(file),quad:null};
+}
+function labelItemById(id){return labelItems.find(x=>x.id===id);}
+function revokeLabelItem(item){if(item?.url)try{URL.revokeObjectURL(item.url);}catch{}}
+function moveLabelItem(from,to){if(from===to||from<0||to<0||from>=labelItems.length||to>=labelItems.length)return;const [item]=labelItems.splice(from,1);labelItems.splice(to,0,item);}
+function clearLabelDropTargets(){document.querySelectorAll('.label-image-list .pdf-item.drop-target').forEach(el=>el.classList.remove('drop-target'));}
+function bindLabelDrag(handle,tile,itemId){
+  handle.addEventListener('click',e=>e.stopPropagation());
+  handle.addEventListener('pointerdown',ev=>{
+    if(ev.button!=null&&ev.button!==0)return;const from=labelItems.findIndex(x=>x.id===itemId);if(from<0)return;
+    labelDrag={itemId,from,targetId:itemId,startX:ev.clientX,startY:ev.clientY,moved:false,pointerId:ev.pointerId};tile.classList.add('dragging');
+    try{handle.setPointerCapture(ev.pointerId);}catch{} ev.preventDefault();ev.stopPropagation();
+  });
+  handle.addEventListener('pointermove',ev=>{
+    if(!labelDrag||labelDrag.pointerId!==ev.pointerId)return;if(Math.hypot(ev.clientX-labelDrag.startX,ev.clientY-labelDrag.startY)>5)labelDrag.moved=true;if(!labelDrag.moved)return;
+    const target=document.elementFromPoint(ev.clientX,ev.clientY)?.closest?.('.label-image-list .pdf-item');clearLabelDropTargets();
+    if(target&&target.dataset.id!==itemId){target.classList.add('drop-target');labelDrag.targetId=target.dataset.id;}else labelDrag.targetId=itemId;ev.preventDefault();
+  });
+  const end=ev=>{if(!labelDrag||labelDrag.pointerId!==ev.pointerId)return;const drag=labelDrag;labelDrag=null;try{handle.releasePointerCapture(ev.pointerId);}catch{}clearLabelDropTargets();tile.classList.remove('dragging');if(drag.moved){const to=labelItems.findIndex(x=>x.id===drag.targetId);if(to>=0&&to!==drag.from)moveLabelItem(drag.from,to);labelSuppressClickUntil=Date.now()+320;renderLabelBuilder();}ev.preventDefault();ev.stopPropagation();};
+  handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+}
+function renderLabelBuilder(){
+  const list=$('labelImageList'),empty=$('labelEmpty');if(!list||!empty)return;list.innerHTML='';empty.classList.toggle('hidden',labelItems.length>0);list.classList.toggle('hidden',labelItems.length===0);
+  if(labelSelectedId&&!labelItemById(labelSelectedId))labelSelectedId=null;
+  labelItems.forEach((item,index)=>{
+    const tile=document.createElement('div');tile.className='pdf-item'+(labelSelectedId===item.id?' selected':'');tile.dataset.id=item.id;
+    const thumb=document.createElement('div');thumb.className='pdf-thumb';const img=document.createElement('img');img.src=item.url;img.alt=`Label image ${index+1}`;thumb.appendChild(img);
+    const pageNo=document.createElement('span');pageNo.className='pdf-page-no';pageNo.textContent=String(index+1);thumb.appendChild(pageNo);
+    const handle=document.createElement('button');handle.type='button';handle.className='pdf-drag-handle';handle.innerHTML='<svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';thumb.appendChild(handle);
+    const actions=document.createElement('div');actions.className='pdf-tile-actions';
+    const replace=document.createElement('button');replace.type='button';replace.className='pdf-replace-item';replace.textContent='↻ Replace';
+    const remove=document.createElement('button');remove.type='button';remove.className='pdf-remove-item';remove.textContent='✕ Remove';actions.append(replace,remove);thumb.appendChild(actions);tile.appendChild(thumb);
+    const name=document.createElement('div');name.className='pdf-name';name.textContent=item.name;tile.appendChild(name);
+    tile.addEventListener('click',()=>{if(Date.now()<labelSuppressClickUntil)return;labelSelectedId=labelSelectedId===item.id?null:item.id;renderLabelBuilder();});
+    replace.addEventListener('click',ev=>{ev.stopPropagation();labelReplaceTargetId=item.id;$('labelReplaceInput').click();});
+    remove.addEventListener('click',ev=>{ev.stopPropagation();const i=labelItems.findIndex(x=>x.id===item.id);if(i>=0){revokeLabelItem(labelItems[i]);labelItems.splice(i,1);if(labelSelectedId===item.id)labelSelectedId=null;renderLabelBuilder();}});
+    bindLabelDrag(handle,tile,item.id);list.appendChild(tile);
+  });
+  $('labelContinueBtn').disabled=labelItems.length===0;
+}
+function addLabelFiles(files){const images=[...files].filter(f=>f.type?.startsWith('image/'));if(!images.length){toast('Choose one or more images.');return;}labelItems.push(...images.map(makeLabelItem));labelSelectedId=null;renderLabelBuilder();}
+function openLabelAddDialog(){const dlg=$('labelAddDialog');if(dlg&&!dlg.open)dlg.showModal();}
+function closeLabelAddDialog(){if($('labelAddDialog')?.open)$('labelAddDialog').close();}
+async function startLabelCamera(){
+  closeLabelAddDialog();stopHomeCameraBg();
+  if(!navigator.mediaDevices?.getUserMedia){const input=document.createElement('input');input.type='file';input.accept='image/*';input.capture='environment';input.onchange=()=>addLabelFiles(input.files||[]);input.click();return;}
+  try{
+    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    const video=$('labelCameraVideo');video.srcObject=labelCameraStream;await video.play().catch(()=>{});labelCameraSessionCount=0;$('labelCameraCount').textContent='0';$('labelCameraDialog').showModal();
+  }catch(err){console.warn(err);toast('Camera could not open. Choose Photos instead.');startHomeCameraBg();}
+}
+function stopLabelCamera(resumeAmbient=true){if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop());labelCameraStream=null;}const video=$('labelCameraVideo');if(video)video.srcObject=null;if($('labelCameraDialog')?.open)$('labelCameraDialog').close();if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg();}
+async function captureLabelCamera(){
+  const video=$('labelCameraVideo');if(!video?.videoWidth)return;const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(video.videoWidth,video.videoHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*scale));c.height=Math.max(1,Math.round(video.videoHeight*scale));c.getContext('2d').drawImage(video,0,0,c.width,c.height);const blob=await canvasBlob(c,'image/jpeg',.94);if(!blob)return;const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});addLabelFiles([file]);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);toast(`Photo ${labelCameraSessionCount} added.`);
+}
+function defaultLabelQuad(){return [{x:.05,y:.07},{x:.95,y:.07},{x:.95,y:.93},{x:.05,y:.93}];}
+function cloneQuad(q){return q.map(p=>({x:p.x,y:p.y}));}
+async function renderLabelArea(){
+  if(!labelItems.length){showView('label');return;}labelAreaIndex=clamp(labelAreaIndex,0,labelItems.length-1);const item=labelItems[labelAreaIndex];if(!item.quad)item.quad=defaultLabelQuad();
+  try{labelAreaBitmap?.close?.();}catch{}labelAreaBitmap=await createImageBitmap(item.blob);const maxEdge=1500,scale=Math.min(1,maxEdge/Math.max(labelAreaBitmap.width,labelAreaBitmap.height));const canvas=$('labelAreaCanvas');canvas.width=Math.max(1,Math.round(labelAreaBitmap.width*scale));canvas.height=Math.max(1,Math.round(labelAreaBitmap.height*scale));drawLabelArea();$('labelAreaCounter').textContent=`Image ${labelAreaIndex+1} of ${labelItems.length}`;$('labelPrevBtn').disabled=labelAreaIndex===0;$('labelNextBtn').textContent=labelAreaIndex===labelItems.length-1?'Stitch Label':'Next →';
+}
+function drawLabelArea(){
+  const canvas=$('labelAreaCanvas');if(!canvas||!labelAreaBitmap||!labelItems[labelAreaIndex])return;const ctx=canvas.getContext('2d');const q=labelItems[labelAreaIndex].quad||defaultLabelQuad();ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);ctx.fillStyle='rgba(0,0,0,.30)';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);ctx.restore();const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);grad.addColorStop(0,'#35cfff');grad.addColorStop(.5,'#697dff');grad.addColorStop(1,'#ff4fe3');ctx.strokeStyle=grad;ctx.lineWidth=Math.max(2,canvas.width/420);ctx.shadowBlur=12;ctx.shadowColor='#35cfff';ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.stroke();ctx.shadowBlur=0;q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,r=Math.max(8,canvas.width/90);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=i%2?'#ff4fe3':'#35cfff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();});
+}
+function labelAreaPointerPos(ev){const c=$('labelAreaCanvas'),r=c.getBoundingClientRect();return{x:clamp((ev.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((ev.clientY-r.top)/Math.max(1,r.height),0,1),cssW:r.width,cssH:r.height};}
+function labelAreaPointerDown(ev){const item=labelItems[labelAreaIndex];if(!item)return;const p=labelAreaPointerPos(ev),q=item.quad||defaultLabelQuad();let best=-1,dist=1e9;q.forEach((pt,i)=>{const d=Math.hypot((pt.x-p.x)*p.cssW,(pt.y-p.y)*p.cssH);if(d<dist){dist=d;best=i;}});if(dist>54)return;labelAreaDragIndex=best;try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
+function labelAreaPointerMove(ev){if(labelAreaDragIndex<0)return;const item=labelItems[labelAreaIndex],p=labelAreaPointerPos(ev);item.quad[labelAreaDragIndex]={x:p.x,y:p.y};drawLabelArea();ev.preventDefault();}
+function labelAreaPointerEnd(ev){if(labelAreaDragIndex<0)return;labelAreaDragIndex=-1;try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
+async function startLabelAreaFlow(){if(!labelItems.length){toast('Add label images first.');return;}labelAreaIndex=0;showView('labelArea');await renderLabelArea();}
+async function labelAreaNext(){if(labelAreaIndex<labelItems.length-1){labelAreaIndex++;await renderLabelArea();}else await buildLabelResult();}
+async function labelAreaPrevious(){if(labelAreaIndex>0){labelAreaIndex--;await renderLabelArea();}}
+function applyLabelAreaRemaining(){const item=labelItems[labelAreaIndex];if(!item)return;for(let i=labelAreaIndex+1;i<labelItems.length;i++)labelItems[i].quad=cloneQuad(item.quad||defaultLabelQuad());toast('Area copied to remaining images.');}
+async function warpLabelItem(item,targetH=900){
+  const bmp=await createImageBitmap(item.blob);try{const maxSrc=1900,srcScale=Math.min(1,maxSrc/Math.max(bmp.width,bmp.height)),sw=Math.max(1,Math.round(bmp.width*srcScale)),sh=Math.max(1,Math.round(bmp.height*srcScale));const sc=document.createElement('canvas');sc.width=sw;sc.height=sh;const sx=sc.getContext('2d',{willReadFrequently:true});sx.drawImage(bmp,0,0,sw,sh);const sd=sx.getImageData(0,0,sw,sh).data,q=(item.quad||defaultLabelQuad()).map(p=>({x:p.x*sw,y:p.y*sh}));const [tl,tr,br,bl]=q,top=Math.hypot(tr.x-tl.x,tr.y-tl.y),bottom=Math.hypot(br.x-bl.x,br.y-bl.y),left=Math.hypot(bl.x-tl.x,bl.y-tl.y),right=Math.hypot(br.x-tr.x,br.y-tr.y),ratio=((top+bottom)/2)/Math.max(1,(left+right)/2);const H=Math.max(420,Math.min(1000,targetH)),W=Math.max(260,Math.min(1900,Math.round(H*ratio)));const out=document.createElement('canvas');out.width=W;out.height=H;const ox=out.getContext('2d'),img=ox.createImageData(W,H),od=img.data;let oi=0;for(let y=0;y<H;y++){const v=y/(H-1);for(let x=0;x<W;x++){const u=x/(W-1);let px=(1-u)*(1-v)*tl.x+u*(1-v)*tr.x+u*v*br.x+(1-u)*v*bl.x,py=(1-u)*(1-v)*tl.y+u*(1-v)*tr.y+u*v*br.y+(1-u)*v*bl.y;px=clamp(px,0,sw-1.001);py=clamp(py,0,sh-1.001);const x0=px|0,y0=py|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=px-x0,fy=py-y0,i00=(y0*sw+x0)*4,i10=(y0*sw+x1)*4,i01=(y1*sw+x0)*4,i11=(y1*sw+x1)*4;for(let c=0;c<3;c++){const a=sd[i00+c]*(1-fx)+sd[i10+c]*fx,b=sd[i01+c]*(1-fx)+sd[i11+c]*fx;od[oi+c]=a*(1-fy)+b*fy;}od[oi+3]=255;oi+=4;}}ox.putImageData(img,0,0);return out;}finally{bmp.close?.();}
+}
+function estimateLabelOverlap(a,b){
+  const maxO=Math.max(20,Math.floor(Math.min(a.width,b.width)*.58)),minO=Math.max(16,Math.floor(Math.min(a.width,b.width)*.10)),steps=12;const ad=a.getContext('2d',{willReadFrequently:true}).getImageData(0,0,a.width,a.height).data,bd=b.getContext('2d',{willReadFrequently:true}).getImageData(0,0,b.width,b.height).data;let bestO=minO,best=Infinity;
+  for(let s=0;s<steps;s++){const o=Math.round(minO+(maxO-minO)*(s/(steps-1)));let score=0,n=0;for(let gy=1;gy<=18;gy++){const y=Math.min(a.height-2,Math.round(gy*a.height/19));for(let gx=1;gx<=18;gx++){const xx=Math.round(gx*(o-1)/19),ax=a.width-o+xx,bx=xx,ap=(y*a.width+ax)*4,bp=(y*b.width+bx)*4,ap2=(y*a.width+Math.max(0,ax-3))*4,bp2=(y*b.width+Math.max(0,bx-3))*4;const al=.299*ad[ap]+.587*ad[ap+1]+.114*ad[ap+2],bl=.299*bd[bp]+.587*bd[bp+1]+.114*bd[bp+2],ae=al-(.299*ad[ap2]+.587*ad[ap2+1]+.114*ad[ap2+2]),be=bl-(.299*bd[bp2]+.587*bd[bp2+1]+.114*bd[bp2+2]);score+=Math.abs(ae-be)*.72+Math.abs(al-bl)*.28;n++;}}score/=Math.max(1,n);if(score<best){best=score;bestO=o;}}
+  return best>78?Math.round(Math.min(a.width,b.width)*.12):bestO;
+}
+async function stitchLabelPieces(pieces){
+  if(!pieces.length)throw new Error('No label pieces');const overlaps=[];for(let i=1;i<pieces.length;i++)overlaps.push(estimateLabelOverlap(pieces[i-1],pieces[i]));let total=pieces.reduce((s,p)=>s+p.width,0)-overlaps.reduce((s,o)=>s+o,0),H=Math.max(...pieces.map(p=>p.height));const out=document.createElement('canvas');out.width=Math.max(1,total);out.height=H;const ctx=out.getContext('2d');let x=0;ctx.drawImage(pieces[0],0,0);x+=pieces[0].width;for(let i=1;i<pieces.length;i++){const p=pieces[i],o=overlaps[i-1];x-=o;const tmp=document.createElement('canvas');tmp.width=p.width;tmp.height=p.height;const tx=tmp.getContext('2d');tx.drawImage(p,0,0);tx.globalCompositeOperation='destination-in';const g=tx.createLinearGradient(0,0,p.width,0),stop=Math.min(.98,Math.max(.02,o/Math.max(1,p.width)));g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,p.width,p.height);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,x,0);x+=p.width;}if(out.width>6144){const scaled=document.createElement('canvas'),f=6144/out.width;scaled.width=6144;scaled.height=Math.max(1,Math.round(out.height*f));scaled.getContext('2d').drawImage(out,0,0,scaled.width,scaled.height);return scaled;}return out;
+}
+async function buildLabelResult(){
+  busy(true,'Preparing label sections…');try{const pieces=[];for(let i=0;i<labelItems.length;i++){$('busyText').textContent=`Flattening label section · ${i+1}/${labelItems.length}`;pieces.push(await warpLabelItem(labelItems[i],900));await new Promise(r=>setTimeout(r,0));}$('busyText').textContent='Matching overlaps & stitching…';const stitched=await stitchLabelPieces(pieces);$('busyText').textContent='Polishing label…';const ctx=stitched.getContext('2d',{willReadFrequently:true}),raw=ctx.getImageData(0,0,stitched.width,stitched.height);labelResultImage=aggressiveCleanupImage(raw);const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='Label stitched and locally polished. Tap ✦ for an optional AI document polish.';showView('labelResult');}catch(err){console.error(err);toast('Could not stitch these label images. Try adjusting the selected areas.');}finally{busy(false);}
+}
+async function aiPolishLabelResult(){
+  if(!labelResultImage)return;const ratio=Math.max(labelResultImage.width/labelResultImage.height,labelResultImage.height/labelResultImage.width);if(ratio>3){toast('This label is wider than the current AI whole-image limit. Local polish has been kept.');return;}busy(true,'AI polishing label…');const oldRef=aiReferenceDataUrl,oldName=aiReferenceName;aiReferenceDataUrl='';aiReferenceName='';try{const state=await checkAiService(true);if(state!=='ready')throw new Error('AI service unavailable');labelResultImage=await gptRestoreImage(labelResultImage,'document');const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='AI label polish complete.';}catch(err){console.error(err);$('labelResultStatus').className='ai-engine-status fallback';$('labelResultStatus').querySelector('span').textContent='AI polish was unavailable. The locally polished stitched label is still ready to save.';}finally{aiReferenceDataUrl=oldRef;aiReferenceName=oldName;busy(false);}
+}
+function promptFileName({title='Name your file',help='Choose the name used when this file is saved.',defaultName='MeshDoctor-file',extension='.png'}={}){
+  const dlg=$('fileNameDialog');if(!dlg)return Promise.resolve(sanitizeFileName(defaultName,'MeshDoctor-file'));$('fileNameTitle').textContent=title;$('fileNameHelp').textContent=help;$('fileNameInput').value=sanitizeFileName(defaultName,'MeshDoctor-file');$('fileNameExtension').textContent=extension;if(!dlg.open)dlg.showModal();setTimeout(()=>$('fileNameInput')?.select(),40);return new Promise(resolve=>{fileNameResolve=resolve;});
+}
+function closeFileNameDialog(value=null){if($('fileNameDialog')?.open)$('fileNameDialog').close();const resolve=fileNameResolve;fileNameResolve=null;if(resolve)resolve(value);}
+async function requestPdfSave(){if(!pdfItems.length){toast('Add pages first.');return;}const name=await promptFileName({title:'Name your PDF',help:'Choose the filename for this PDF.',defaultName:userSettings.pdfFilename||'MeshDoctor-created',extension:'.pdf'});if(!name)return;userSettings.pdfFilename=name;saveSettings();syncSettingsUi();await savePdf(name);}
+async function saveLabelResult(){if(!labelResultImage)return;const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:'MeshDoctor-label',extension:'.png'});if(!name)return;const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob)await saveBlobToOutput(blob,`${name}.png`,'Images');}
+
+async function savePdf(baseName=userSettings.pdfFilename){
   if(!pdfItems.length){toast('Add pages first.');return;}
   busy(true,`Building PDF · 1/${pdfItems.length}`);
   try{
     const pages=[];
     for(let i=0;i<pdfItems.length;i++){$('busyText').textContent=`Building PDF · ${i+1}/${pdfItems.length}`;pages.push(await pdfPageImage(pdfItems[i]));await new Promise(r=>setTimeout(r,0));}
     const pdf=buildImagePdf(pages);
-    const fileName=`${sanitizeFileName(userSettings.pdfFilename,'MeshDoctor-created')}.pdf`;
+    const fileName=`${sanitizeFileName(baseName||userSettings.pdfFilename,'MeshDoctor-created')}.pdf`;
     await saveBlobToOutput(pdf,fileName,'PDFs');
   }catch(err){console.error(err);toast('Could not build the PDF.');}
   finally{busy(false);}
@@ -1505,14 +1619,45 @@ $('aiReferenceInput')?.addEventListener('change',async e=>{
 });
 $('aiReferenceClearBtn')?.addEventListener('click',()=>clearAiReference());
 $('pdfBuilderBtn').addEventListener('click',()=>{pdfEditingId=null;showView('pdf');});
-$('labelMakerBtn').addEventListener('click',()=>showView('label'));
+$('labelMakerBtn').addEventListener('click',()=>{clearAiReference(true);showView('label');});
 $('labelBackBtn').addEventListener('click',()=>showView('home'));
+$('labelAddBtn')?.addEventListener('click',openLabelAddDialog);
+$('labelEmptyAddBtn')?.addEventListener('click',openLabelAddDialog);
+$('labelAddCloseBtn')?.addEventListener('click',closeLabelAddDialog);
+$('labelAddDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeLabelAddDialog();});
+$('labelCameraChoiceBtn')?.addEventListener('click',startLabelCamera);
+$('labelPhotosChoiceBtn')?.addEventListener('click',()=>{closeLabelAddDialog();$('labelPhotoInput').click();});
+$('labelPhotoInput')?.addEventListener('change',e=>{addLabelFiles(e.target.files||[]);e.target.value='';});
+$('labelReplaceInput')?.addEventListener('change',e=>{const file=e.target.files?.[0];e.target.value='';if(!file||!labelReplaceTargetId)return;const item=labelItemById(labelReplaceTargetId);labelReplaceTargetId=null;if(!item)return;revokeLabelItem(item);item.blob=file;item.url=URL.createObjectURL(file);item.name=file.name||item.name;item.quad=null;renderLabelBuilder();toast('Label image replaced.');});
+$('labelContinueBtn')?.addEventListener('pointerdown',burstCorrectButton);
+$('labelContinueBtn')?.addEventListener('click',startLabelAreaFlow);
+$('labelCameraCaptureBtn')?.addEventListener('click',captureLabelCamera);
+$('labelCameraDoneBtn')?.addEventListener('click',stopLabelCamera);
+$('labelCameraCancelBtn')?.addEventListener('click',stopLabelCamera);
+$('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();stopLabelCamera();});
+$('labelAreaBackBtn')?.addEventListener('click',()=>showView('label'));
+$('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){item.quad=defaultLabelQuad();drawLabelArea();toast('Label area reset.');}});
+$('labelApplyRemainingBtn')?.addEventListener('click',applyLabelAreaRemaining);
+$('labelPrevBtn')?.addEventListener('click',labelAreaPrevious);
+$('labelNextBtn')?.addEventListener('click',labelAreaNext);
+$('labelAreaCanvas')?.addEventListener('pointerdown',labelAreaPointerDown);
+$('labelAreaCanvas')?.addEventListener('pointermove',labelAreaPointerMove);
+$('labelAreaCanvas')?.addEventListener('pointerup',labelAreaPointerEnd);
+$('labelAreaCanvas')?.addEventListener('pointercancel',labelAreaPointerEnd);
+$('labelResultBackBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
+$('labelRebuildBtn')?.addEventListener('click',async()=>{showView('labelArea');await renderLabelArea();});
+$('labelAiPolishBtn')?.addEventListener('click',aiPolishLabelResult);
+$('labelSaveBtn')?.addEventListener('click',saveLabelResult);
+$('fileNameSaveBtn')?.addEventListener('click',()=>closeFileNameDialog(sanitizeFileName($('fileNameInput')?.value,'MeshDoctor-file')));
+$('fileNameCancelBtn')?.addEventListener('click',()=>closeFileNameDialog(null));
+$('fileNameCloseBtn')?.addEventListener('click',()=>closeFileNameDialog(null));
+$('fileNameDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeFileNameDialog(null);});
 $('pdfBackBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
 $('pdfAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
 $('pdfEmptyAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
 $('pdfImageInput').addEventListener('change',async e=>{const files=[...e.target.files];e.target.value='';await addPdfSources(files);});
 $('savePdfBtn').addEventListener('pointerdown',burstCorrectButton);
-$('savePdfBtn').addEventListener('click',savePdf);
+$('savePdfBtn').addEventListener('click',requestPdfSave);
 $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Image boundary re-detected.');});
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
@@ -1550,8 +1695,8 @@ if($('pdfImportAdd')) $('pdfImportAdd').addEventListener('click',()=>closePdfImp
 if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.preventDefault();closePdfImport([]);});
 
 loadSettings();
-window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
-window.addEventListener('pagehide', stopHomeCameraBg);
-document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();renderLabelBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
+document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.17', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.0', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.5.17" />
-  <link rel="icon" href="icons/icon-192.png?v=1.5.17" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.17" />
-  <link rel="stylesheet" href="styles.css?v=1.5.17" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.0" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.0" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.0" />
+  <link rel="stylesheet" href="styles.css?v=1.6.0" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.5.17" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.0" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.5.17</div>
+      <div class="version-tag">release v1.6.0</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -51,28 +51,58 @@
     </section>
 
     <section id="labelView" class="view label-view">
-      <div class="feature-shell glass-panel">
-        <div class="pdf-head feature-head">
+      <div class="pdf-shell glass-panel label-shell">
+        <div class="pdf-head">
           <button id="labelBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <div class="pdf-title feature-title">
+          <div class="pdf-title">
             <strong>Label Maker</strong>
-            <span>Coming next: stitch multiple images into one cleaned label or texture strip</span>
+            <span>Add, order, select label areas, then stitch &amp; polish</span>
           </div>
-          <div class="feature-head-spacer" aria-hidden="true"></div>
+          <button id="labelAddBtn" class="neon-icon-btn pdf-add" aria-label="Add label images">＋</button>
         </div>
-        <div class="feature-copy">
-          <div class="feature-badge">🏷️</div>
-          <strong>New feature on the roadmap</strong>
-          <p>Label Maker will let you feed MeshDoctor multiple images of the same label, package, or flat texture so it can stitch them together, clean glare, and preserve readable text and flat colors.</p>
-          <ul class="feature-list">
-            <li>Add multiple label photos</li>
-            <li>Stitch sections into one long result</li>
-            <li>Clean reflections and lighting inconsistencies</li>
-            <li>Preserve text, logos, and flat-color label regions</li>
-            <li>Useful for packaging, product labels, and 3D texture references</li>
-          </ul>
-          <div class="feature-note">For now, the feature has been added to the main menu so its place in MeshDoctor is ready for the next build.</div>
+        <div id="labelImageList" class="pdf-image-list label-image-list"></div>
+        <div id="labelEmpty" class="pdf-empty">
+          <div class="pdf-empty-icon">🏷️</div>
+          <strong>Add label images to begin</strong>
+          <span>Photograph around a package or select existing photos. Keep some overlap between neighbouring images.</span>
+          <button id="labelEmptyAddBtn" class="secondary neon-action">Add Images</button>
         </div>
+      </div>
+      <button id="labelContinueBtn" class="bottom-action pdf-save mesh-correct" disabled><span>CONTINUE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
+      <input id="labelPhotoInput" type="file" accept="image/*" multiple hidden />
+      <input id="labelReplaceInput" type="file" accept="image/*" hidden />
+    </section>
+
+    <section id="labelAreaView" class="view label-area-view">
+      <div class="label-area-head glass-panel">
+        <button id="labelAreaBackBtn" class="neon-icon-btn" aria-label="Back to label images"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pdf-title"><strong id="labelAreaTitle">Select Label Area</strong><span id="labelAreaCounter">Image 1 of 1</span></div>
+        <button id="labelAreaAutoBtn" class="neon-icon-btn" aria-label="Reset label area">◇</button>
+      </div>
+      <div id="labelAreaStage" class="label-area-stage">
+        <canvas id="labelAreaCanvas"></canvas>
+      </div>
+      <div class="label-area-help glass-panel">Drag the four neon points around the label area. For curved containers, select the visible label section in this photo. MeshDoctor will flatten each section before stitching.</div>
+      <div class="label-area-tools">
+        <button id="labelApplyRemainingBtn" class="themed-secondary">Apply Area to Remaining</button>
+        <div class="label-area-nav">
+          <button id="labelPrevBtn" class="themed-secondary">← Previous</button>
+          <button id="labelNextBtn" class="primary">Next →</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="labelResultView" class="view label-result-view">
+      <div class="label-result-head glass-panel">
+        <button id="labelResultBackBtn" class="neon-icon-btn" aria-label="Back to label area"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pdf-title"><strong>Label Result</strong><span>Stitched &amp; locally polished</span></div>
+        <button id="labelAiPolishBtn" class="neon-icon-btn" aria-label="AI polish">✦</button>
+      </div>
+      <div class="label-result-stage"><canvas id="labelResultCanvas"></canvas></div>
+      <div id="labelResultStatus" class="ai-engine-status ready"><i></i><span>Label stitched and polished. Tap ✦ for an optional AI document polish.</span></div>
+      <div class="label-result-actions">
+        <button id="labelRebuildBtn" class="themed-secondary">↶ Rebuild</button>
+        <button id="labelSaveBtn" class="primary">Save PNG</button>
       </div>
     </section>
 
@@ -242,11 +272,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.5.17</h2>
+    <h2>MeshDoctor v1.6.0</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.5.17:</strong> keeps solid-color document regions uniform, preserves gradients only where they actually exist in the source, and narrows Photo mode to faithful optical restoration of glare, reflections, fading, and print damage.</p>
+    <p><strong>v1.6.0:</strong> introduces the first working Label Maker workflow: add images from Camera or Photos, reorder / replace / remove them, select each label area with MeshDoctor-style neon points, stitch overlapping sections, run a local corrective polish, optionally use AI polish, name the result, and save it. Create a PDF now also asks for a filename at save time.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -271,11 +301,33 @@
     </div>
   </dialog>
 
+  <dialog id="labelAddDialog" class="source-choice-dialog">
+    <div class="source-choice-head"><strong>Add Images</strong><button id="labelAddCloseBtn" class="neon-icon-btn" type="button" aria-label="Close">✕</button></div>
+    <p>Choose how you want to add label images.</p>
+    <button id="labelCameraChoiceBtn" class="primary source-choice-btn" type="button">📷 Camera</button>
+    <button id="labelPhotosChoiceBtn" class="themed-secondary source-choice-btn" type="button">🖼️ Photos</button>
+  </dialog>
+
+  <dialog id="labelCameraDialog" class="label-camera-dialog">
+    <div class="label-camera-view"><video id="labelCameraVideo" autoplay playsinline muted></video><div class="label-camera-guide"><span>Keep the label inside the guide and overlap each photo with the previous one.</span></div></div>
+    <div class="label-camera-controls">
+      <button id="labelCameraCancelBtn" class="themed-secondary" type="button">Cancel</button>
+      <button id="labelCameraCaptureBtn" class="camera-shutter" type="button" aria-label="Capture photo"><span></span></button>
+      <button id="labelCameraDoneBtn" class="primary" type="button">Done <b id="labelCameraCount">0</b></button>
+    </div>
+  </dialog>
+
+  <dialog id="fileNameDialog" class="file-name-dialog">
+    <div class="settings-head"><div><h2 id="fileNameTitle">Name your file</h2><p id="fileNameHelp">Choose the name used when this file is saved.</p></div><button id="fileNameCloseBtn" class="neon-icon-btn" type="button" aria-label="Close">✕</button></div>
+    <div class="file-name-body"><label class="settings-label">File name<input id="fileNameInput" type="text" maxlength="96" placeholder="MeshDoctor-file" /></label><div id="fileNameExtension" class="file-name-extension">.png</div></div>
+    <div class="settings-actions"><button id="fileNameCancelBtn" class="themed-secondary" type="button">Cancel</button><button id="fileNameSaveBtn" class="primary" type="button">Save</button></div>
+  </dialog>
+
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.5.17"></script>
+  <script src="config.js?v=1.6.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.5.17"></script>
+  <script src="app.js?v=1.6.0"></script>
 </body>
 </html>
