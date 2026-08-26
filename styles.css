@@ -282,3 +282,14 @@ body.pdf-mode .pdf-save{display:block}
 .label-camera-align-status.good{color:#7ff0ff;border-color:rgba(87,217,255,.46);box-shadow:0 0 18px rgba(53,207,255,.12)}
 .label-camera-align-status.capture{color:#f0fbff;border-color:rgba(255,79,227,.42);box-shadow:0 0 20px rgba(255,79,227,.12)}
 @media(min-width:800px){.label-camera-instruction,.label-camera-align-status{left:20px;right:20px}.label-camera-toolbar{left:20px;right:20px}}
+
+
+/* MeshDoctor v1.6.6 panoramic camera layout cleanup */
+.label-camera-toolbar{display:grid;grid-template-columns:1.05fr 1.05fr .9fr;gap:7px;align-items:center;flex-wrap:nowrap}
+.label-camera-toolbar .label-camera-chip{width:100%;min-width:0;justify-content:center;padding:0 8px;font-size:10.5px;white-space:nowrap}
+.label-camera-toolbar .label-camera-chip.action{font-size:10.5px}
+.label-camera-first-shot{position:absolute;left:14px;right:14px;bottom:108px;min-height:38px;display:flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:14px;background:rgba(8,16,26,.82);border:1px solid rgba(87,217,255,.22);color:#bceeff;font-size:11px;font-weight:800;text-align:center;z-index:4;backdrop-filter:blur(10px);transition:opacity .18s ease,transform .18s ease}
+.label-camera-first-shot.hidden{opacity:0;transform:translateY(6px);pointer-events:none}
+.label-camera-instruction{bottom:18px}
+.label-camera-align-status{display:none!important}
+@media(max-width:430px){.label-camera-toolbar{gap:5px}.label-camera-toolbar .label-camera-chip{font-size:9.5px;padding:0 5px}.label-camera-toolbar .label-camera-chip input{width:13px;height:13px}}

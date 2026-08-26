@@ -1680,16 +1680,18 @@ function resizeLabelCameraOverlay(){
 function smoothPath(ctx,pts){if(pts.length<2)return;ctx.moveTo(pts[0].x,pts[0].y);for(let i=0;i<pts.length-1;i++){const p=pts[i],n=pts[i+1],mx=(p.x+n.x)/2,my=(p.y+n.y)/2;ctx.quadraticCurveTo(p.x,p.y,mx,my);}const lp=pts[pts.length-1];ctx.lineTo(lp.x,lp.y);}
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
-  const status=$('labelCameraAlignStatus'),help=$('labelCameraInstructionText');
-  if(help)help.textContent=s.prevStrip?'Match the ghosted strip from the previous capture. Auto Capture will trigger when overlap looks good, or you can tap the shutter yourself.':'Set your curved guide, then take the first narrow label photo.';
-  if(!status)return;
-  status.className='label-camera-align-status';
-  if(!s.prevStrip){status.textContent='Manual capture for the first shot.';return;}
+  const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');
+  if(first) first.classList.toggle('hidden',!!s.prevStrip);
+  if(!help)return;
+  if(!s.prevStrip){
+    help.textContent='Set the curved guide around the visible label and take the first narrow photo.';
+    return;
+  }
   const pct=Math.round(s.alignScore*100);
-  if(s.matchFrames>10){status.classList.add('capture');status.textContent=`Overlap locked · auto capturing (${pct}%)`;return;}
-  if(s.alignScore>.79){status.classList.add('good');status.textContent=`Good overlap detected · ${pct}% match`;return;}
-  if(s.alignScore>.62){status.classList.add('ready');status.textContent=`Getting close · ${pct}% match`;return;}
-  status.textContent=`Rotate until the ghost strip lines up · ${pct}% match`;
+  if(s.matchFrames>10){help.textContent=`Overlap locked at ${pct}%. MeshDoctor is capturing the next section.`;return;}
+  if(s.alignScore>.79){help.textContent=`Good overlap · ${pct}% match. Hold steady or let Auto Capture take the shot.`;return;}
+  if(s.alignScore>.62){help.textContent=`Almost aligned · ${pct}% match. Rotate the bottle a little more.`;return;}
+  help.textContent=`Rotate slowly and line the live label up with the ghosted previous section · ${pct}% match.`;
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
@@ -2140,4 +2142,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.5', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.6', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
