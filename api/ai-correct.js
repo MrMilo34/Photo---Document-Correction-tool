@@ -21,20 +21,23 @@ function promptFor(mode){
   if(mode === 'document'){
     return common.concat([
       'Restore this photographed, scanned, or digital document/page for readability, archival, educational, or professional use.',
-      'The page may contain ordinary paperwork, school material, diagrams, scientific or anatomy textbook content, health information, forms, tables, signatures, logos, illustrations, or technical material. Treat these as documentary content and preserve them faithfully.',
+      'The page may contain ordinary paperwork, school material, diagrams, scientific or anatomy textbook content, health information, forms, tables, signatures, logos, illustrations, labels, packaging, charts, classroom graphics, or technical material. Treat these as documentary content and preserve them faithfully.',
       'Reduce glare, reflections, shadows, haze, fading, stains, discoloration, folds, blur, noise, compression artifacts, and uneven lighting when possible.',
       'Improve legibility, contrast, sharpness, white balance, and color balance while preserving the exact crop, page geometry, layout, text, numbers, punctuation, line breaks, spacing, borders, tables, diagrams, signatures, logos, and other visible content.',
-      'Do not rewrite, correct, infer, replace, remove, move, censor, or hallucinate document content. Do not redesign the page.',
+      'Preserve the source graphic design style. When a region is visibly a flat solid-color fill, such as a form field, spreadsheet cell, label, card, banner, background, or printed panel, keep that region a uniform solid color from edge to edge. Do not introduce gradients, painterly shading, texture, glow, or color variation into flat-color regions.',
+      'If an icon, pictogram, illustration, logo, or photograph visibly contains gradients or shading in the source, preserve those gradients only within that element. Keep the surrounding labels, panels, borders, and background fills consistent with the original flat colors.',
+      'For computer-generated or professionally printed pages, favor a clean screenshot/desktop-export appearance: crisp edges, consistent fills, neutral whites, even backgrounds, and faithful colors rather than a re-rendered artistic look.',
+      'Do not rewrite, correct, infer, replace, remove, move, censor, or hallucinate document content. Do not redesign the page or change its color scheme.',
       'Return a cleaner and more legible version of the same document or page.'
     ]).join(' ');
   }
   return common.concat([
-    'Restore this real-world photograph or scanned printed photo for archival and memory-preservation purposes.',
-    'Reduce glare, reflections, haze, washout, fading, stains, discoloration, dust, scratches, scan artifacts, blur, noise, compression artifacts, and damage caused by age or uneven light exposure when possible.',
+    'Perform optical restoration of this user-supplied personal photograph or scanned printed photo for archival and memory-preservation purposes.',
+    'The requested edit is limited to correcting capture, print, and age-related defects such as glare, reflections, haze, washout, fading, color casts, stains, discoloration, dust, scratches, scan artifacts, blur, noise, compression artifacts, and uneven light exposure.',
     'Improve contrast, white balance, color balance, natural saturation, visibility, and fine detail while keeping the result believable and faithful to the original photograph.',
-    'Preserve the original people, pose, clothing, objects, background, lighting direction, camera angle, crop, composition, text, logos, and scene context.',
-    'Do not add, remove, replace, relocate, stylize, beautify, or reinterpret people or objects. Do not change expressions, relationships, clothing coverage, or the meaning of the scene.',
-    'Return a faithful restored version of the same photograph, as if the same print or moment had been captured in better condition.'
+    'Preserve the same subjects, scene, pose, clothing, objects, background, lighting direction, camera angle, crop, composition, text, logos, and context. Treat any people shown as ordinary subjects in an archival photograph.',
+    'Do not add, remove, replace, relocate, stylize, beautify, sexualize, intensify, or reinterpret any subject or interaction. Do not change expressions, clothing coverage, relationships, or the meaning of the scene.',
+    'Make only restoration corrections that could reasonably result from better scanning, better lighting, or repair of the original print. Return a faithful restored version of the same photograph.'
   ]).join(' ');
 }
 
