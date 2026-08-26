@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.6.0" />
-  <link rel="icon" href="icons/icon-192.png?v=1.6.0" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.0" />
-  <link rel="stylesheet" href="styles.css?v=1.6.0" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.1" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.1" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.1" />
+  <link rel="stylesheet" href="styles.css?v=1.6.1" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.6.0" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.1" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.6.0</div>
+      <div class="version-tag">release v1.6.1</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -82,7 +82,7 @@
       <div id="labelAreaStage" class="label-area-stage">
         <canvas id="labelAreaCanvas"></canvas>
       </div>
-      <div class="label-area-help glass-panel">Drag the four neon points around the label area. For curved containers, select the visible label section in this photo. MeshDoctor will flatten each section before stitching.</div>
+      <div class="label-area-help glass-panel">Drag the four neon points around the label area. Drag the 4-way control in the center to reposition the whole selection. For curved containers, select the visible label section in this photo.</div>
       <div class="label-area-tools">
         <button id="labelApplyRemainingBtn" class="themed-secondary">Apply Area to Remaining</button>
         <div class="label-area-nav">
@@ -137,9 +137,14 @@
           <button id="movePointBtn" class="point-action move" aria-label="Move selected point"><svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Move</span></button>
           <button id="removePointBtn" class="point-action remove" aria-label="Remove selected point">✕ <span>Remove</span></button>
         </div>
+        <button id="meshMoveAllBtn" class="mesh-move-all hidden" type="button" aria-label="Move whole mesh"><svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <div id="zoomChip" class="zoom-chip hidden">1.0×</div>
       </div>
-      <div class="hint shape-ui">Pinch to zoom. Tap a point for Move / Remove. Tap a line to add a point.</div>
+      <div class="hint shape-ui">Pinch to zoom. Drag empty space to move around. Tap a point for Move / Remove. Tap a line to add a point.</div>
+      <div id="labelRotationPanel" class="label-rotation-panel shape-ui hidden">
+        <div class="label-rotation-head"><span>Straighten</span><output id="labelRotationValue">0.0°</output><button id="labelRotationResetBtn" type="button">Reset</button></div>
+        <input id="labelRotationSlider" type="range" min="-10" max="10" step="0.1" value="0" aria-label="Rotate stitched label" />
+      </div>
       <div class="toolbar shape-ui">
         <button id="autoBtn" class="mesh-tool">✨ <span>Auto</span></button>
         <button id="undoPointBtn" class="mesh-tool">↶ <span>Undo</span></button>
@@ -272,11 +277,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.6.0</h2>
+    <h2>MeshDoctor v1.6.1</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.0:</strong> introduces the first working Label Maker workflow: add images from Camera or Photos, reorder / replace / remove them, select each label area with MeshDoctor-style neon points, stitch overlapping sections, run a local corrective polish, optionally use AI polish, name the result, and save it. Create a PDF now also asks for a filename at save time.</p>
+    <p><strong>v1.6.1:</strong> introduces the first working Label Maker workflow: add images from Camera or Photos, reorder / replace / remove them, select each label area with MeshDoctor-style neon points, stitch overlapping sections, run a local corrective polish, optionally use AI polish, name the result, and save it. Create a PDF now also asks for a filename at save time.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -326,8 +331,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.6.0"></script>
+  <script src="config.js?v=1.6.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.6.0"></script>
+  <script src="app.js?v=1.6.1"></script>
 </body>
 </html>

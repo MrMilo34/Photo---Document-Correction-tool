@@ -1,38 +1,30 @@
-# MeshDoctor v1.6.0
+# MeshDoctor v1.6.1
 
-## Label Maker — first working build
-Label Maker is now functional rather than a placeholder.
+## What’s new in v1.6.1
 
-Workflow:
-1. Tap **Label Maker** from the home screen.
-2. Tap **Add Images** and choose **Camera** or **Photos**.
-3. Camera mode stays open so you can capture overlapping photos until you tap **Done**.
-4. Imported / captured images appear in the same style of order table used by Create a PDF.
-5. Drag the 4-way handle to reorder. Tap a tile for **Replace** or **Remove**.
-6. Tap **Continue** and place the four neon points around the visible label region in each image.
-7. Use **Apply Area to Remaining** when the label occupies a similar area in the following photos.
-8. MeshDoctor flattens each selected section, estimates overlap, stitches the ordered sections, and runs a local document-style polish.
-9. The result screen offers an optional **AI polish** for stitched results within the current whole-image aspect limit.
-10. Tap **Save PNG**, name the label, and save it to the configured MeshDoctor output folder (or Downloads fallback).
+### Label Maker post-stitch editor
+- After **Stitch Label**, the stitched result now opens in the full MeshDoctor mesh editor instead of the old simple result-only screen.
+- The stitched label supports the same **pinch zoom** and **free panning** used by the normal photo/document mesh editor.
+- Label results start with a richer perimeter mesh. Individual points can be moved and additional perimeter points can still be added the normal MeshDoctor way.
+- A centered **4-way move control** lets the user reposition the entire mesh without moving every point separately.
+- Added a **Straighten** slider from -10° to +10° for fine rotation. Rotation keeps the original canvas size and does **not automatically zoom or crop the image**.
+- After mesh correction, Label Maker uses the normal result workflow: **Adjust, Grayscale, Corrected, and AI Assisted**.
+- Saving a corrected label still opens the naming dialog before the PNG is written to the MeshDoctor Images output folder / Downloads fallback.
 
-### Output size
-The stitched mobile-browser output is capped at 6144 pixels wide in this build to protect memory and stability while retaining useful label / texture detail.
+### Label source-area workflow
+- The four-point label selection used on each source photo now also has a centered **4-way move handle**. This makes it much easier to copy an area to the remaining images and nudge the whole selection left/right/up/down when the next photo is slightly offset.
 
-## Create a PDF
-**Save PDF** now opens a naming dialog before the PDF is built and saved. The chosen name becomes the next default.
+### Panoramic protection
+- Extra-wide stitched labels are preserved at full width. MeshDoctor avoids sending panoramas beyond the current whole-image AI ratio to a process that could resize/crop them; a local full-width polish is used instead.
 
-## File output
-When a supported browser folder is selected in Settings, MeshDoctor writes to:
-
-```text
-<Selected Folder>/MeshDoctor/Images
-<Selected Folder>/MeshDoctor/PDFs
-```
-
-If folder access is unavailable, MeshDoctor uses normal Downloads.
-
-## AI backend
-`api/ai-correct.js` continues to support the optional additional reference image introduced in v1.5.15. Label Maker uses the existing Document restoration path for optional final AI polish.
+## Label Maker workflow
+1. Add images from Camera or Photos.
+2. Reorder / replace / remove images.
+3. Select the visible label area on each source image.
+4. Stitch the label.
+5. Correct the stitched result with the full MeshDoctor mesh editor, optional Straighten rotation, zoom and pan.
+6. Continue to normal Adjust / Grayscale / Corrected / AI Assisted options.
+7. Name and save the final PNG.
 
 ## Cache/version
-PWA cache key: `meshdoctor-v1.6.0`.
+PWA cache key: `meshdoctor-v1.6.1`.

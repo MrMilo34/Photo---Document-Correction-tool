@@ -6,7 +6,7 @@ const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willRea
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
 const stageWrap = $('stageWrap'), canvasPan = $('canvasPan'), canvasZoom = $('canvasZoom');
-const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), removePointBtn = $('removePointBtn'), zoomChip = $('zoomChip');
+const pointActions = $('pointActions'), movePointBtn = $('movePointBtn'), removePointBtn = $('removePointBtn'), meshMoveAllBtn = $('meshMoveAllBtn'), zoomChip = $('zoomChip');
 const sourceCanvas = document.createElement('canvas'), sctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const workingCanvas = document.createElement('canvas'), wctx = workingCanvas.getContext('2d', { willReadFrequently: true });
 const homeBgVideo = $('homeBgVideo');
@@ -37,7 +37,13 @@ let labelReplaceTargetId=null;
 let labelAreaIndex=0;
 let labelAreaBitmap=null;
 let labelAreaDragIndex=-1;
+let labelAreaDragStart=null;
 let labelResultImage=null;
+let labelEditorMode=false;
+let meshMoveAllDrag=null;
+let shapeRotationDegrees=0;
+const shapeRotationBase=document.createElement('canvas');
+const shapeRotationBaseCtx=shapeRotationBase.getContext('2d');
 let labelCameraStream=null;
 let labelCameraSessionCount=0;
 let fileNameResolve=null;
@@ -323,12 +329,14 @@ function showView(name){
   document.body.classList.toggle('home-mode', name==='home');
   document.body.classList.toggle('pdf-mode', name==='pdf');
   document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf'||name==='label');
+  views.shape.classList.toggle('label-mesh-mode', name==='shape'&&labelEditorMode);
   if(name!=='shape') hidePointActions();
   if(name==='home'||name==='pdf'||name==='label') startHomeCameraBg();
   else stopHomeCameraBg();
   if(name==='result') updateResultActions();
   if(name==='pdf') renderPdfBuilder();
   if(name==='label') renderLabelBuilder();
+  if(name==='shape') updateMeshMoveAllPosition();
   window.scrollTo(0,0);
 }
 function busy(on, text='Working…'){ $('busyText').textContent=text; $('busy').classList.toggle('hidden', !on); }
@@ -337,6 +345,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 async function loadFile(file, options={}){
   if(!file) return;
+  if(!options.preserveLabelEditor) labelEditorMode=false;
   clearAiReference(true);
   pdfEditingId = options.pdfItemId || null;
   currentFileBase = (file.name || 'image').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'image';
@@ -370,6 +379,56 @@ function defaultQuad(){
     {x:w*m,y:h*m,corner:0},{x:w*(1-m),y:h*m,corner:1},
     {x:w*(1-m),y:h*(1-m),corner:2},{x:w*m,y:h*(1-m),corner:3}
   ];
+}
+
+function defaultLabelEditMesh(){
+  const w=sourceCanvas.width,h=sourceCanvas.height,mx=.015,my=.055;
+  const L=w*mx,R=w*(1-mx),T=h*my,B=h*(1-my);
+  return [
+    {x:L,y:T,corner:0},{x:L+(R-L)*.25,y:T},{x:L+(R-L)*.50,y:T},{x:L+(R-L)*.75,y:T},{x:R,y:T,corner:1},
+    {x:R,y:T+(B-T)*.50},
+    {x:R,y:B,corner:2},{x:L+(R-L)*.75,y:B},{x:L+(R-L)*.50,y:B},{x:L+(R-L)*.25,y:B},{x:L,y:B,corner:3},
+    {x:L,y:T+(B-T)*.50}
+  ];
+}
+function setShapeRotationBaseFromSource(){
+  shapeRotationBase.width=sourceCanvas.width;shapeRotationBase.height=sourceCanvas.height;
+  shapeRotationBaseCtx.clearRect(0,0,shapeRotationBase.width,shapeRotationBase.height);
+  shapeRotationBaseCtx.drawImage(sourceCanvas,0,0);
+  shapeRotationDegrees=0;
+  const slider=$('labelRotationSlider'),out=$('labelRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';
+}
+function renderShapeRotation(degrees){
+  if(!labelEditorMode||!shapeRotationBase.width)return;
+  shapeRotationDegrees=clamp(Number(degrees)||0,-10,10);
+  sourceCanvas.width=shapeRotationBase.width;sourceCanvas.height=shapeRotationBase.height;
+  sctx.save();sctx.clearRect(0,0,sourceCanvas.width,sourceCanvas.height);sctx.fillStyle='#05070a';sctx.fillRect(0,0,sourceCanvas.width,sourceCanvas.height);
+  sctx.translate(sourceCanvas.width/2,sourceCanvas.height/2);sctx.rotate(shapeRotationDegrees*Math.PI/180);sctx.drawImage(shapeRotationBase,-shapeRotationBase.width/2,-shapeRotationBase.height/2);sctx.restore();
+  setupEditCanvas();renderEditor();
+  const out=$('labelRotationValue');if(out)out.textContent=`${shapeRotationDegrees.toFixed(1)}°`;
+}
+function meshCenter(){
+  if(!points.length)return null;let x=0,y=0;for(const p of points){x+=p.x;y+=p.y;}return{x:x/points.length,y:y/points.length};
+}
+function updateMeshMoveAllPosition(){
+  if(!meshMoveAllBtn)return;
+  if(!labelEditorMode||!views.shape.classList.contains('active')||!points.length){meshMoveAllBtn.classList.add('hidden');return;}
+  const c=meshCenter(),cr=editCanvas.getBoundingClientRect(),sr=stageWrap.getBoundingClientRect();
+  if(!c||!cr.width||!cr.height){meshMoveAllBtn.classList.add('hidden');return;}
+  const x=cr.left-sr.left+(c.x/editCanvas.width)*cr.width,y=cr.top-sr.top+(c.y/editCanvas.height)*cr.height;
+  meshMoveAllBtn.style.left=`${clamp(x,32,sr.width-32)}px`;meshMoveAllBtn.style.top=`${clamp(y,32,sr.height-32)}px`;meshMoveAllBtn.classList.remove('hidden');
+}
+function translateWholeMesh(dx,dy,origin){
+  if(!origin?.length)return;
+  const minX=Math.min(...origin.map(p=>p.x)),maxX=Math.max(...origin.map(p=>p.x)),minY=Math.min(...origin.map(p=>p.y)),maxY=Math.max(...origin.map(p=>p.y));
+  dx=clamp(dx,-minX,editCanvas.width-1-maxX);dy=clamp(dy,-minY,editCanvas.height-1-maxY);
+  points=origin.map(p=>({...p,x:p.x+dx,y:p.y+dy}));selectedIndex=-1;hidePointActions();renderEditor();
+}
+function startLabelPostStitchEditor(img){
+  labelEditorMode=true;pdfEditingId=null;clearAiReference(true);currentFileBase='MeshDoctor-label';
+  sourceCanvas.width=img.width;sourceCanvas.height=img.height;sctx.putImageData(img,0,0);setupEditCanvas();setShapeRotationBaseFromSource();
+  points=defaultLabelEditMesh();history=[];selectedIndex=-1;correctedOriginal=null;correctedImage=null;aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);resetViewport();renderEditor();showView('shape');
+  toast('Stitched label ready for mesh correction. Pinch to zoom or drag the center arrows to move the whole mesh.');
 }
 
 function otsuThreshold(hist,total){
@@ -448,6 +507,7 @@ function applyViewport(showChip=false){
     applyViewport._chipTimer=setTimeout(()=>zoomChip.classList.add('hidden'),850);
   }else zoomChip.classList.add('hidden');
   updatePointActions();
+  updateMeshMoveAllPosition();
 }
 function resetViewport(){
   editZoom=1;panX=0;panY=0;pinchState=null;gesture=null;pinchedUntilClear=false;activePointers.clear();
@@ -499,6 +559,7 @@ function renderEditor(){
   });
   ectx.restore();
   updatePointActions();
+  updateMeshMoveAllPosition();
 }
 
 function eventToCanvas(ev){
@@ -640,7 +701,7 @@ function makeCorrected(){
   if([top,right,bottom,left].some(e=>e.length<2)) throw new Error('Invalid perimeter');
   const rawW=(polyLength(top)+polyLength(bottom))/2, rawH=(polyLength(left)+polyLength(right))/2;
   const rawRatio=rawW/Math.max(rawH,1), snappedRatio=chooseDocumentRatio(rawRatio);
-  const maxOut=2000, baseScale=Math.min(1,maxOut/Math.max(rawW,rawH));
+  const maxOut=labelEditorMode?6144:2000, baseScale=Math.min(1,maxOut/Math.max(rawW,rawH));
   const area=Math.max(320*320, rawW*rawH*baseScale*baseScale);
   let W=Math.max(320,Math.round(Math.sqrt(area*snappedRatio))), H=Math.max(320,Math.round(Math.sqrt(area/snappedRatio)));
   const fit=Math.min(1,maxOut/Math.max(W,H));
@@ -1137,9 +1198,15 @@ async function gptRestoreImage(img,mode){
 async function runAiRestoreChoice(choice){
   aiRestoreChoice=choice;
   document.querySelectorAll('.ai-choice').forEach(b=>b.classList.toggle('active',b.dataset.aiChoice===choice));
-  const resolved=choice==='automatic'?detectRestoreIntent(correctedOriginal):choice;
+  const resolved=choice==='automatic'?(labelEditorMode?'document':detectRestoreIntent(correctedOriginal)):choice;
   $('aiChoiceStatus').textContent=choice==='automatic'?`Automatic selected ${resolved === 'document' ? 'Document' : 'Photo'}.`:`${choice === 'document' ? 'Document' : 'Photo'} restore selected.`;
   if(aiReferenceDataUrl) $('aiChoiceStatus').textContent += ' Optional reference added.';
+  const labelPanoramaRatio=labelEditorMode&&correctedOriginal?Math.max(correctedOriginal.width/correctedOriginal.height,correctedOriginal.height/correctedOriginal.width):1;
+  if(labelEditorMode&&labelPanoramaRatio>3){
+    busy(true,'Polishing panoramic label locally…');await new Promise(r=>setTimeout(r,20));
+    try{aiAssistImage=cleanupImage(correctedOriginal);displayImage(aiAssistImage);currentMode='assist';setModeButtons();setAiEngineStatus('ready','Panoramic label kept at full width · local polish used to avoid AI resizing or cropping');$('aiChoiceStatus').textContent='Full-width label preserved. AI whole-image processing was skipped for this extra-wide result.';}
+    finally{busy(false);}return;
+  }
   busy(true, resolved==='document'?'AI cleaning document…':'AI restoring photo…');
   await new Promise(r=>setTimeout(r,20));
   try{
@@ -1212,7 +1279,7 @@ function scheduleAdjustmentRender(){
 
 function rotateSource(){
   const c=document.createElement('canvas');c.width=sourceCanvas.height;c.height=sourceCanvas.width;const cx=c.getContext('2d');cx.translate(c.width,0);cx.rotate(Math.PI/2);cx.drawImage(sourceCanvas,0,0);
-  sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=autoDetectDocument();history=[];selectedIndex=-1;hidePointActions();resetViewport();renderEditor();
+  sourceCanvas.width=c.width;sourceCanvas.height=c.height;sctx.drawImage(c,0,0);setupEditCanvas();points=labelEditorMode?defaultLabelEditMesh():autoDetectDocument();history=[];selectedIndex=-1;hidePointActions();if(labelEditorMode)setShapeRotationBaseFromSource();resetViewport();renderEditor();
 }
 
 
@@ -1220,7 +1287,8 @@ function updateResultActions(){
   const save=$('savePngBtn');
   if(!save)return;
   save.textContent=pdfEditingId?'Save & Continue':'Save PNG';
-  save.setAttribute('aria-label',pdfEditingId?'Save edited page and return to PDF builder':'Save PNG');
+  save.setAttribute('aria-label',pdfEditingId?'Save edited page and return to PDF builder':(labelEditorMode?'Save stitched label PNG':'Save PNG'));
+  if(labelEditorMode){const name=$('imageOutputName');if(name&&!name.value)name.value='MeshDoctor-label';}
 }
 
 function pdfItemById(id){ return pdfItems.find(x=>x.id===id); }
@@ -1529,12 +1597,41 @@ async function renderLabelArea(){
   try{labelAreaBitmap?.close?.();}catch{}labelAreaBitmap=await createImageBitmap(item.blob);const maxEdge=1500,scale=Math.min(1,maxEdge/Math.max(labelAreaBitmap.width,labelAreaBitmap.height));const canvas=$('labelAreaCanvas');canvas.width=Math.max(1,Math.round(labelAreaBitmap.width*scale));canvas.height=Math.max(1,Math.round(labelAreaBitmap.height*scale));drawLabelArea();$('labelAreaCounter').textContent=`Image ${labelAreaIndex+1} of ${labelItems.length}`;$('labelPrevBtn').disabled=labelAreaIndex===0;$('labelNextBtn').textContent=labelAreaIndex===labelItems.length-1?'Stitch Label':'Next →';
 }
 function drawLabelArea(){
-  const canvas=$('labelAreaCanvas');if(!canvas||!labelAreaBitmap||!labelItems[labelAreaIndex])return;const ctx=canvas.getContext('2d');const q=labelItems[labelAreaIndex].quad||defaultLabelQuad();ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);ctx.fillStyle='rgba(0,0,0,.30)';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);ctx.restore();const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);grad.addColorStop(0,'#35cfff');grad.addColorStop(.5,'#697dff');grad.addColorStop(1,'#ff4fe3');ctx.strokeStyle=grad;ctx.lineWidth=Math.max(2,canvas.width/420);ctx.shadowBlur=12;ctx.shadowColor='#35cfff';ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.stroke();ctx.shadowBlur=0;q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,r=Math.max(8,canvas.width/90);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=i%2?'#ff4fe3':'#35cfff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();});
+  const canvas=$('labelAreaCanvas');if(!canvas||!labelAreaBitmap||!labelItems[labelAreaIndex])return;
+  const ctx=canvas.getContext('2d'),q=labelItems[labelAreaIndex].quad||defaultLabelQuad();
+  ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);
+  ctx.fillStyle='rgba(0,0,0,.30)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.save();ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.clip();ctx.drawImage(labelAreaBitmap,0,0,canvas.width,canvas.height);ctx.restore();
+  const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);grad.addColorStop(0,'#35cfff');grad.addColorStop(.5,'#697dff');grad.addColorStop(1,'#ff4fe3');
+  ctx.strokeStyle=grad;ctx.lineWidth=Math.max(2,canvas.width/420);ctx.shadowBlur=12;ctx.shadowColor='#35cfff';ctx.beginPath();q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.stroke();ctx.shadowBlur=0;
+  q.forEach((p,i)=>{const x=p.x*canvas.width,y=p.y*canvas.height,r=Math.max(8,canvas.width/90);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=i%2?'#ff4fe3':'#35cfff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();});
+  const center=labelAreaCenter(q),cx=center.x*canvas.width,cy=center.y*canvas.height,rr=Math.max(24,canvas.width/34);
+  ctx.save();ctx.shadowBlur=18;ctx.shadowColor='rgba(53,207,255,.34)';ctx.fillStyle='rgba(8,22,34,.90)';ctx.strokeStyle='rgba(87,217,255,.88)';ctx.lineWidth=Math.max(2,canvas.width/600);ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+  ctx.strokeStyle='#bff4ff';ctx.lineWidth=Math.max(2.2,canvas.width/520);ctx.lineCap='round';ctx.lineJoin='round';const arm=rr*.52,tip=rr*.22;
+  ctx.beginPath();ctx.moveTo(cx-arm,cy);ctx.lineTo(cx+arm,cy);ctx.moveTo(cx,cy-arm);ctx.lineTo(cx,cy+arm);
+  ctx.moveTo(cx-arm,cy);ctx.lineTo(cx-arm+tip,cy-tip);ctx.moveTo(cx-arm,cy);ctx.lineTo(cx-arm+tip,cy+tip);
+  ctx.moveTo(cx+arm,cy);ctx.lineTo(cx+arm-tip,cy-tip);ctx.moveTo(cx+arm,cy);ctx.lineTo(cx+arm-tip,cy+tip);
+  ctx.moveTo(cx,cy-arm);ctx.lineTo(cx-tip,cy-arm+tip);ctx.moveTo(cx,cy-arm);ctx.lineTo(cx+tip,cy-arm+tip);
+  ctx.moveTo(cx,cy+arm);ctx.lineTo(cx-tip,cy+arm-tip);ctx.moveTo(cx,cy+arm);ctx.lineTo(cx+tip,cy+arm-tip);ctx.stroke();ctx.restore();
 }
 function labelAreaPointerPos(ev){const c=$('labelAreaCanvas'),r=c.getBoundingClientRect();return{x:clamp((ev.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((ev.clientY-r.top)/Math.max(1,r.height),0,1),cssW:r.width,cssH:r.height};}
-function labelAreaPointerDown(ev){const item=labelItems[labelAreaIndex];if(!item)return;const p=labelAreaPointerPos(ev),q=item.quad||defaultLabelQuad();let best=-1,dist=1e9;q.forEach((pt,i)=>{const d=Math.hypot((pt.x-p.x)*p.cssW,(pt.y-p.y)*p.cssH);if(d<dist){dist=d;best=i;}});if(dist>54)return;labelAreaDragIndex=best;try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
-function labelAreaPointerMove(ev){if(labelAreaDragIndex<0)return;const item=labelItems[labelAreaIndex],p=labelAreaPointerPos(ev);item.quad[labelAreaDragIndex]={x:p.x,y:p.y};drawLabelArea();ev.preventDefault();}
-function labelAreaPointerEnd(ev){if(labelAreaDragIndex<0)return;labelAreaDragIndex=-1;try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
+function labelAreaCenter(q){return{x:q.reduce((s,p)=>s+p.x,0)/q.length,y:q.reduce((s,p)=>s+p.y,0)/q.length};}
+function labelAreaPointerDown(ev){
+  const item=labelItems[labelAreaIndex];if(!item)return;const p=labelAreaPointerPos(ev),q=item.quad||defaultLabelQuad(),center=labelAreaCenter(q);
+  const centerDist=Math.hypot((center.x-p.x)*p.cssW,(center.y-p.y)*p.cssH);
+  if(centerDist<=38){labelAreaDragIndex=-2;labelAreaDragStart={pointerId:ev.pointerId,start:{x:p.x,y:p.y},quad:cloneQuad(q)};}
+  else{let best=-1,dist=1e9;q.forEach((pt,i)=>{const d=Math.hypot((pt.x-p.x)*p.cssW,(pt.y-p.y)*p.cssH);if(d<dist){dist=d;best=i;}});if(dist>54)return;labelAreaDragIndex=best;labelAreaDragStart={pointerId:ev.pointerId};}
+  try{$('labelAreaCanvas').setPointerCapture(ev.pointerId);}catch{}ev.preventDefault();
+}
+function labelAreaPointerMove(ev){
+  if(labelAreaDragIndex===-1)return;const item=labelItems[labelAreaIndex],p=labelAreaPointerPos(ev);
+  if(labelAreaDragIndex===-2&&labelAreaDragStart?.quad){
+    const origin=labelAreaDragStart.quad,dx0=p.x-labelAreaDragStart.start.x,dy0=p.y-labelAreaDragStart.start.y,minX=Math.min(...origin.map(q=>q.x)),maxX=Math.max(...origin.map(q=>q.x)),minY=Math.min(...origin.map(q=>q.y)),maxY=Math.max(...origin.map(q=>q.y));
+    const dx=clamp(dx0,-minX,1-maxX),dy=clamp(dy0,-minY,1-maxY);item.quad=origin.map(q=>({x:q.x+dx,y:q.y+dy}));
+  }else if(labelAreaDragIndex>=0){item.quad[labelAreaDragIndex]={x:p.x,y:p.y};}
+  drawLabelArea();ev.preventDefault();
+}
+function labelAreaPointerEnd(ev){if(labelAreaDragIndex===-1)return;labelAreaDragIndex=-1;labelAreaDragStart=null;try{$('labelAreaCanvas').releasePointerCapture(ev.pointerId);}catch{}ev.preventDefault();}
 async function startLabelAreaFlow(){if(!labelItems.length){toast('Add label images first.');return;}labelAreaIndex=0;showView('labelArea');await renderLabelArea();}
 async function labelAreaNext(){if(labelAreaIndex<labelItems.length-1){labelAreaIndex++;await renderLabelArea();}else await buildLabelResult();}
 async function labelAreaPrevious(){if(labelAreaIndex>0){labelAreaIndex--;await renderLabelArea();}}
@@ -1551,7 +1648,17 @@ async function stitchLabelPieces(pieces){
   if(!pieces.length)throw new Error('No label pieces');const overlaps=[];for(let i=1;i<pieces.length;i++)overlaps.push(estimateLabelOverlap(pieces[i-1],pieces[i]));let total=pieces.reduce((s,p)=>s+p.width,0)-overlaps.reduce((s,o)=>s+o,0),H=Math.max(...pieces.map(p=>p.height));const out=document.createElement('canvas');out.width=Math.max(1,total);out.height=H;const ctx=out.getContext('2d');let x=0;ctx.drawImage(pieces[0],0,0);x+=pieces[0].width;for(let i=1;i<pieces.length;i++){const p=pieces[i],o=overlaps[i-1];x-=o;const tmp=document.createElement('canvas');tmp.width=p.width;tmp.height=p.height;const tx=tmp.getContext('2d');tx.drawImage(p,0,0);tx.globalCompositeOperation='destination-in';const g=tx.createLinearGradient(0,0,p.width,0),stop=Math.min(.98,Math.max(.02,o/Math.max(1,p.width)));g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,p.width,p.height);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,x,0);x+=p.width;}if(out.width>6144){const scaled=document.createElement('canvas'),f=6144/out.width;scaled.width=6144;scaled.height=Math.max(1,Math.round(out.height*f));scaled.getContext('2d').drawImage(out,0,0,scaled.width,scaled.height);return scaled;}return out;
 }
 async function buildLabelResult(){
-  busy(true,'Preparing label sections…');try{const pieces=[];for(let i=0;i<labelItems.length;i++){$('busyText').textContent=`Flattening label section · ${i+1}/${labelItems.length}`;pieces.push(await warpLabelItem(labelItems[i],900));await new Promise(r=>setTimeout(r,0));}$('busyText').textContent='Matching overlaps & stitching…';const stitched=await stitchLabelPieces(pieces);$('busyText').textContent='Polishing label…';const ctx=stitched.getContext('2d',{willReadFrequently:true}),raw=ctx.getImageData(0,0,stitched.width,stitched.height);labelResultImage=aggressiveCleanupImage(raw);const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='Label stitched and locally polished. Tap ✦ for an optional AI document polish.';showView('labelResult');}catch(err){console.error(err);toast('Could not stitch these label images. Try adjusting the selected areas.');}finally{busy(false);}
+  busy(true,'Preparing label sections…');
+  try{
+    const pieces=[];
+    for(let i=0;i<labelItems.length;i++){$('busyText').textContent=`Flattening label section · ${i+1}/${labelItems.length}`;pieces.push(await warpLabelItem(labelItems[i],900));await new Promise(r=>setTimeout(r,0));}
+    $('busyText').textContent='Matching overlaps & stitching…';
+    const stitched=await stitchLabelPieces(pieces),ctx=stitched.getContext('2d',{willReadFrequently:true});
+    labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
+    $('busyText').textContent='Opening mesh editor…';await new Promise(r=>setTimeout(r,20));
+    startLabelPostStitchEditor(labelResultImage);
+  }catch(err){console.error(err);toast('Could not stitch these label images. Try adjusting the selected areas.');}
+  finally{busy(false);}
 }
 async function aiPolishLabelResult(){
   if(!labelResultImage)return;const ratio=Math.max(labelResultImage.width/labelResultImage.height,labelResultImage.height/labelResultImage.width);if(ratio>3){toast('This label is wider than the current AI whole-image limit. Local polish has been kept.');return;}busy(true,'AI polishing label…');const oldRef=aiReferenceDataUrl,oldName=aiReferenceName;aiReferenceDataUrl='';aiReferenceName='';try{const state=await checkAiService(true);if(state!=='ready')throw new Error('AI service unavailable');labelResultImage=await gptRestoreImage(labelResultImage,'document');const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='AI label polish complete.';}catch(err){console.error(err);$('labelResultStatus').className='ai-engine-status fallback';$('labelResultStatus').querySelector('span').textContent='AI polish was unavailable. The locally polished stitched label is still ready to save.';}finally{aiReferenceDataUrl=oldRef;aiReferenceName=oldName;busy(false);}
@@ -1562,6 +1669,11 @@ function promptFileName({title='Name your file',help='Choose the name used when 
 function closeFileNameDialog(value=null){if($('fileNameDialog')?.open)$('fileNameDialog').close();const resolve=fileNameResolve;fileNameResolve=null;if(resolve)resolve(value);}
 async function requestPdfSave(){if(!pdfItems.length){toast('Add pages first.');return;}const name=await promptFileName({title:'Name your PDF',help:'Choose the filename for this PDF.',defaultName:userSettings.pdfFilename||'MeshDoctor-created',extension:'.pdf'});if(!name)return;userSettings.pdfFilename=name;saveSettings();syncSettingsUi();await savePdf(name);}
 async function saveLabelResult(){if(!labelResultImage)return;const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:'MeshDoctor-label',extension:'.png'});if(!name)return;const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob)await saveBlobToOutput(blob,`${name}.png`,'Images');}
+async function saveLabelEditorResult(){
+  const suggested=sanitizeFileName($('imageOutputName')?.value||'MeshDoctor-label','MeshDoctor-label');
+  const name=await promptFileName({title:'Name your label',help:'Choose the filename for this corrected stitched label image.',defaultName:suggested,extension:'.png'});if(!name)return;
+  const blob=await canvasBlob(resultCanvas,'image/png');if(blob)await saveBlobToOutput(blob,`${name}.png`,'Images');
+}
 
 async function savePdf(baseName=userSettings.pdfFilename){
   if(!pdfItems.length){toast('Add pages first.');return;}
@@ -1618,9 +1730,9 @@ $('aiReferenceInput')?.addEventListener('change',async e=>{
   }finally{busy(false);}
 });
 $('aiReferenceClearBtn')?.addEventListener('click',()=>clearAiReference());
-$('pdfBuilderBtn').addEventListener('click',()=>{pdfEditingId=null;showView('pdf');});
-$('labelMakerBtn').addEventListener('click',()=>{clearAiReference(true);showView('label');});
-$('labelBackBtn').addEventListener('click',()=>showView('home'));
+$('pdfBuilderBtn').addEventListener('click',()=>{labelEditorMode=false;pdfEditingId=null;showView('pdf');});
+$('labelMakerBtn').addEventListener('click',()=>{labelEditorMode=false;clearAiReference(true);showView('label');});
+$('labelBackBtn').addEventListener('click',()=>{labelEditorMode=false;showView('home');});
 $('labelAddBtn')?.addEventListener('click',openLabelAddDialog);
 $('labelEmptyAddBtn')?.addEventListener('click',openLabelAddDialog);
 $('labelAddCloseBtn')?.addEventListener('click',closeLabelAddDialog);
@@ -1662,6 +1774,24 @@ $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})))
 $('resetBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=defaultQuad();selectedIndex=-1;hidePointActions();renderEditor();});
 $('undoPointBtn').addEventListener('click',()=>{if(history.length){points=history.pop();selectedIndex=-1;hidePointActions();renderEditor();}else toast('Nothing to undo yet.');});
 $('rotateBtn').addEventListener('click',()=>rotateSource());
+if(meshMoveAllBtn){
+  meshMoveAllBtn.addEventListener('pointerdown',ev=>{
+    if(!labelEditorMode||!points.length)return;ev.preventDefault();ev.stopPropagation();
+    history.push(points.map(p=>({...p})));
+    meshMoveAllDrag={pointerId:ev.pointerId,start:eventToCanvas(ev),origin:points.map(p=>({...p}))};
+    meshMoveAllBtn.classList.add('dragging');try{meshMoveAllBtn.setPointerCapture(ev.pointerId);}catch{}hidePointActions();
+  });
+  meshMoveAllBtn.addEventListener('pointermove',ev=>{
+    if(!meshMoveAllDrag||meshMoveAllDrag.pointerId!==ev.pointerId)return;ev.preventDefault();ev.stopPropagation();
+    const p=eventToCanvas(ev),dx=p.x-meshMoveAllDrag.start.x,dy=p.y-meshMoveAllDrag.start.y;translateWholeMesh(dx,dy,meshMoveAllDrag.origin);
+  });
+  const endWholeMeshMove=ev=>{
+    if(!meshMoveAllDrag||meshMoveAllDrag.pointerId!==ev.pointerId)return;meshMoveAllDrag=null;meshMoveAllBtn.classList.remove('dragging');try{meshMoveAllBtn.releasePointerCapture(ev.pointerId);}catch{}updateMeshMoveAllPosition();ev.preventDefault();ev.stopPropagation();
+  };
+  meshMoveAllBtn.addEventListener('pointerup',endWholeMeshMove);meshMoveAllBtn.addEventListener('pointercancel',endWholeMeshMove);
+}
+$('labelRotationSlider')?.addEventListener('input',ev=>renderShapeRotation(ev.target.value));
+$('labelRotationResetBtn')?.addEventListener('click',()=>{const slider=$('labelRotationSlider');if(slider)slider.value='0';renderShapeRotation(0);});
 function burstCorrectButton(ev){
   const btn=ev?.currentTarget||$('correctBtn'),r=btn.getBoundingClientRect();
   for(let i=0;i<8;i++){
@@ -1672,16 +1802,16 @@ function burstCorrectButton(ev){
   }
 }
 $('correctBtn').addEventListener('pointerdown',burstCorrectButton);$('correctBtn').addEventListener('click',runCorrection);
-$('shapeBackBtn').addEventListener('click',()=>{if(pdfEditingId){pdfEditingId=null;showView('pdf');}else showView('home');});
+$('shapeBackBtn').addEventListener('click',async()=>{if(labelEditorMode){showView('labelArea');await renderLabelArea();}else if(pdfEditingId){pdfEditingId=null;showView('pdf');}else showView('home');});
 $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
-$('resultHomeBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
+$('resultHomeBtn').addEventListener('click',()=>{pdfEditingId=null;labelEditorMode=false;showView('home');});
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
 $('correctedModeBtn').addEventListener('click',()=>setMode('corrected'));
 $('aiAssistModeBtn').addEventListener('click',openAiAssist);
 document.querySelectorAll('.ai-choice').forEach(btn=>btn.addEventListener('click',()=>runAiRestoreChoice(btn.dataset.aiChoice)));
 $('resetAdjustBtn').addEventListener('click',()=>resetAdjustments(true));
-$('savePngBtn').addEventListener('click',()=>pdfEditingId?savePdfEditedPage():downloadCanvas('image/png'));
+$('savePngBtn').addEventListener('click',()=>pdfEditingId?savePdfEditedPage():(labelEditorMode?saveLabelEditorResult():downloadCanvas('image/png')));
 $('shareBtn').addEventListener('click',shareCanvas);
 const homeAboutBtn=$('homeAboutBtn'), aboutDialog=$('aboutDialog'), closeAboutBtn=$('closeAboutBtn');
 if(homeAboutBtn&&aboutDialog) homeAboutBtn.addEventListener('click',()=>aboutDialog.showModal());
@@ -1699,4 +1829,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.0', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.1', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
