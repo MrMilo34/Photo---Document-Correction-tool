@@ -34,6 +34,8 @@ let downPos = null;
 let correctedOriginal = null;
 let correctedImage = null;
 let aiAssistImage = null;
+let aiReferenceDataUrl = '';
+let aiReferenceName = '';
 let adjustedImage = null;
 let grayscaleImageCache = null;
 let currentMode = 'corrected';
@@ -81,6 +83,45 @@ function closeSettingsDialog(){ if($('settingsDialog')?.open) $('settingsDialog'
 function sanitizeFileName(name,fallback='MeshDoctor-created'){
   const cleaned=String(name||'').replace(/[\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
   return cleaned || fallback;
+}
+function sanitizeDisplayName(name,fallback='reference image'){
+  return String(name||fallback).replace(/\s+/g,' ').trim() || fallback;
+}
+function updateAiReferenceUi(){
+  const meta=$('aiReferenceMeta'), clear=$('aiReferenceClearBtn');
+  if(meta){
+    if(aiReferenceDataUrl){
+      meta.textContent=`Using reference: ${aiReferenceName}. The AI will use it only to recover missing or glare-covered detail.`;
+      meta.classList.add('ready');
+    }else{
+      meta.textContent='No reference added.';
+      meta.classList.remove('ready');
+    }
+  }
+  if(clear) clear.classList.toggle('hidden',!aiReferenceDataUrl);
+}
+function clearAiReference(silent=false){
+  aiReferenceDataUrl='';
+  aiReferenceName='';
+  updateAiReferenceUi();
+  if(!silent) toast('Reference image removed.');
+}
+async function fileToUploadDataUrl(file,mode='photo',maxEdge=1536){
+  const bmp=await createImageBitmap(file);
+  try{
+    const scale=Math.min(1,maxEdge/Math.max(bmp.width,bmp.height));
+    const out=document.createElement('canvas');
+    out.width=Math.max(1,Math.round(bmp.width*scale));
+    out.height=Math.max(1,Math.round(bmp.height*scale));
+    const ctx=out.getContext('2d');
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality='high';
+    ctx.drawImage(bmp,0,0,out.width,out.height);
+    const type=mode==='document'?'image/webp':'image/jpeg';
+    let data=out.toDataURL(type,mode==='document'?.94:.9);
+    if(data.length>3_800_000)data=out.toDataURL(type,mode==='document'?.88:.82);
+    return data;
+  }finally{ bmp.close?.(); }
 }
 
 async function startHomeCameraBg(){
@@ -220,6 +261,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 async function loadFile(file, options={}){
   if(!file) return;
+  clearAiReference(true);
   pdfEditingId = options.pdfItemId || null;
   currentFileBase = (file.name || 'image').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'image';
   busy(true,'Loading photo…');
@@ -1001,6 +1043,7 @@ async function dataUrlToImageData(dataUrl){
 
 async function gptRestoreImage(img,mode){
   const payload={image:imageDataToUploadDataUrl(img,mode),mode,width:img.width,height:img.height};
+  if(aiReferenceDataUrl) payload.referenceImage = aiReferenceDataUrl;
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),120000);
   try{
     const res=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
@@ -1020,6 +1063,7 @@ async function runAiRestoreChoice(choice){
   document.querySelectorAll('.ai-choice').forEach(b=>b.classList.toggle('active',b.dataset.aiChoice===choice));
   const resolved=choice==='automatic'?detectRestoreIntent(correctedOriginal):choice;
   $('aiChoiceStatus').textContent=choice==='automatic'?`Automatic selected ${resolved === 'document' ? 'Document' : 'Photo'}.`:`${choice === 'document' ? 'Document' : 'Photo'} restore selected.`;
+  if(aiReferenceDataUrl) $('aiChoiceStatus').textContent += ' Optional reference added.';
   busy(true, resolved==='document'?'AI cleaning document…':'AI restoring photo…');
   await new Promise(r=>setTimeout(r,20));
   try{
@@ -1394,6 +1438,25 @@ $('settingsDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeSet
 
 $('cameraInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
 $('galleryInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+$('aiReferenceInput')?.addEventListener('change',async e=>{
+  const file=e.target.files?.[0];
+  e.target.value='';
+  if(!file) return;
+  const inferredMode=aiRestoreChoice==='document'||aiRestoreChoice==='photo' ? aiRestoreChoice : (correctedOriginal ? detectRestoreIntent(correctedOriginal) : 'photo');
+  busy(true,'Adding reference…');
+  try{
+    aiReferenceDataUrl=await fileToUploadDataUrl(file,inferredMode==='document'?'document':'photo');
+    aiReferenceName=sanitizeDisplayName(file.name);
+    updateAiReferenceUi();
+    $('aiChoiceStatus').textContent='Reference image added. AI can use the second angle during the next restore.';
+    toast('Reference image added.');
+  }catch(err){
+    console.error(err);
+    clearAiReference(true);
+    toast('Could not add that reference image.');
+  }finally{busy(false);}
+});
+$('aiReferenceClearBtn')?.addEventListener('click',()=>clearAiReference());
 $('pdfBuilderBtn').addEventListener('click',()=>{pdfEditingId=null;showView('pdf');});
 $('pdfBackBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
 $('pdfAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
@@ -1438,8 +1501,8 @@ if($('pdfImportAdd')) $('pdfImportAdd').addEventListener('click',()=>closePdfImp
 if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.preventDefault();closePdfImport([]);});
 
 loadSettings();
-window.addEventListener('load',()=>{ syncSettingsUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',()=>{ syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.14', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.15', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

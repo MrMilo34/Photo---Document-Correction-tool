@@ -1,29 +1,29 @@
-# MeshDoctor v1.5.14
+# MeshDoctor v1.5.15
 
-## What’s new in v1.5.14
-- The **ⓘ About** button is relocated to the upper-right corner of the splash screen.
-- The ambient mesh has more line/node volume again, while staying concentrated around the middle of the display.
-- Cyan / purple bloom is reduced further so the live camera background remains easier to see.
-- PDF page reorder handles now use a centered **4-way move** icon instead of a horizontal-only arrow.
-- The mesh-point **Move** control uses the same centered 4-way move icon.
-- **PDF From Images** builder added to the splash screen.
-- Add multiple images, tap a page for **Edit / Remove**, and drag the centered **4-way move** handle to reorder pages.
-- **Edit** routes the selected PDF page through the existing mesh correction screen and the polish / AI Assisted screen.
-- While editing a PDF page, **Save PNG** becomes **Save & Continue** and replaces that page in the PDF builder.
-- **Save PDF** creates a local PDF in the chosen page order; each image is fitted to a Letter-size page without cropping.
-- Added a visible Back button to the mesh editor.
-- The export page keeps the Back arrow and now uses **🏠 Home** in the upper-right to return to the splash screen.
-- The **ⓘ About** control moved to the upper-right of the splash screen.
-- Four mesh-tool buttons were tightened and restyled so Auto / Undo / 4 Points / Rotate fit across a phone screen.
-- Home controls and export controls now use the MeshDoctor neon blue / purple / pink visual language more consistently.
-- The animated mesh now covers the full ambient background, uses more nodes and connections, and fades toward the outside so the center reads more strongly.
-- User-facing restoration text says **AI** instead of **GPT**.
+## What’s new in v1.5.15
+- Added an **optional reference image** inside **AI Assisted**. You can now add a second angle of the same photo or document so the AI has extra visual context when glare or reflections block part of the primary image.
+- Strengthened **Document** prompting so printed charts, classroom posters, labels, forms, and other flat-color layouts keep a cleaner screenshot / print style with more consistent solid fills.
+- Improved best-effort reconstruction guidance for **glare-covered icons and simple artwork** in document mode.
+- Softened **Photo** prompting so ordinary memory-preservation images — including benign couple and family photos — are framed more clearly as faithful optical restoration requests.
+- Kept the restore behavior conservative: the extra reference is used only to recover missing detail, while the final result still stays matched to the main image.
+
+## AI Assisted reference image
+Inside the AI Assisted panel, tap **Add reference** and choose another photo of the same page / poster / printed photo from a different angle. MeshDoctor sends the main image plus the optional reference to the secure AI endpoint.
+
+Best use cases:
+- glare hiding part of a classroom poster or worksheet
+- reflections covering a medication label or form
+- a printed family photo with washout in one area
+- laminated educational charts photographed from different angles
 
 ## PDF behavior
-The PDF builder is entirely client-side. Images are converted one-by-one to JPEG for PDF embedding, fitted within a 612 × 792 point Letter page with a small margin, and saved in the order shown in the builder. The builder does not upload pages to a server.
+The PDF builder remains client-side. You can combine images with selected pages from an imported PDF, reorder them, edit them through MeshDoctor, and create a new PDF.
 
 ## AI correction backend
-The secure serverless endpoint remains `api/ai-correct.js`. Its technical implementation can continue to use the configured OpenAI image model while the app presents the simpler user-facing term **AI**.
+The secure serverless endpoint remains `api/ai-correct.js`. It now accepts:
+- `image` — the primary corrected image
+- `referenceImage` — optional extra angle / supporting image
+- `mode` — `photo` or `document`
 
 Environment variables for Vercel:
 
@@ -33,26 +33,5 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_QUALITY=low
 ```
 
-For a separate frontend such as GitHub Pages, deploy the API separately, set `MESHDOCTOR_ALLOWED_ORIGIN` on the API host, then change `config.js` to the full HTTPS `/api/ai-correct` endpoint.
-
 ## Cache/version
-PWA cache key: `meshdoctor-v1.5.14`.
-
-
-## v1.5.14 note
-
-- Repositioned the ℹ️ button so it sits cleanly in the top-right corner on the splash screen.
-
-
-## v1.5.14 note
-
-- Replaced the diagonal neon line treatment inside the buttons with a polygon-style background effect so you can preview that direction.
-
-
-## v1.5.14 note
-
-- Splash card black backing is about 10 percentage points more opaque.
-- Renamed **PDF From Images** to **Create a PDF**.
-- The PDF builder now accepts both images and PDF files.
-- Imported PDFs open a page-picker where you can select all, select none, include individual pages, or omit pages before adding them to the new PDF.
-- Selected imported PDF pages become normal reorderable/editable pages in the existing MeshDoctor PDF workflow.
+PWA cache key: `meshdoctor-v1.5.15`.
