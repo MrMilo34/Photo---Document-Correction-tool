@@ -1,3 +1,9 @@
+# MeshDoctor v1.6.8
+
+- Fixed the lower-left pink panoramic guide point so the cyan guide line now reaches and closes through that point correctly.
+- Keeps movable mirrored outside pink edges for narrow bottle-label captures.
+- Keeps the camera-performance improvements and cropped narrow capture output from v1.6.7.
+
 # MeshDoctor v1.6.7
 
 - Fixed the lower-left / outside panoramic guide handle interaction.
