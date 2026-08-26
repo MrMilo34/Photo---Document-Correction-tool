@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const views = { home: $('homeView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
+const views = { home: $('homeView'), label: $('labelView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
 const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
@@ -247,9 +247,9 @@ function showView(name){
   document.body.classList.toggle('result-mode', name==='result');
   document.body.classList.toggle('home-mode', name==='home');
   document.body.classList.toggle('pdf-mode', name==='pdf');
-  document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf');
+  document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf'||name==='label');
   if(name!=='shape') hidePointActions();
-  if(name==='home'||name==='pdf') startHomeCameraBg();
+  if(name==='home'||name==='pdf'||name==='label') startHomeCameraBg();
   else stopHomeCameraBg();
   if(name==='result') updateResultActions();
   if(name==='pdf') renderPdfBuilder();
@@ -1458,6 +1458,8 @@ $('aiReferenceInput')?.addEventListener('change',async e=>{
 });
 $('aiReferenceClearBtn')?.addEventListener('click',()=>clearAiReference());
 $('pdfBuilderBtn').addEventListener('click',()=>{pdfEditingId=null;showView('pdf');});
+$('labelMakerBtn').addEventListener('click',()=>showView('label'));
+$('labelBackBtn').addEventListener('click',()=>showView('home'));
 $('pdfBackBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
 $('pdfAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
 $('pdfEmptyAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
@@ -1505,4 +1507,4 @@ window.addEventListener('load',()=>{ syncSettingsUi(); updateAiReferenceUi(); in
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.15', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.16', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

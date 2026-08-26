@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.5.15" />
-  <link rel="icon" href="icons/icon-192.png?v=1.5.15" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.15" />
-  <link rel="stylesheet" href="styles.css?v=1.5.15" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.5.16" />
+  <link rel="icon" href="icons/icon-192.png?v=1.5.16" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.16" />
+  <link rel="stylesheet" href="styles.css?v=1.5.16" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.5.15" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.5.16" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.5.15</div>
+      <div class="version-tag">release v1.5.16</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -46,6 +46,33 @@
           <input id="galleryInput" type="file" accept="image/*" hidden />
         </label>
         <button id="pdfBuilderBtn" class="secondary big-btn neon-action pdf-home-btn">📄 Create a PDF</button>
+        <button id="labelMakerBtn" class="secondary big-btn neon-action label-home-btn">🏷️ Label Maker</button>
+      </div>
+    </section>
+
+    <section id="labelView" class="view label-view">
+      <div class="feature-shell glass-panel">
+        <div class="pdf-head feature-head">
+          <button id="labelBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="pdf-title feature-title">
+            <strong>Label Maker</strong>
+            <span>Coming next: stitch multiple images into one cleaned label or texture strip</span>
+          </div>
+          <div class="feature-head-spacer" aria-hidden="true"></div>
+        </div>
+        <div class="feature-copy">
+          <div class="feature-badge">🏷️</div>
+          <strong>New feature on the roadmap</strong>
+          <p>Label Maker will let you feed MeshDoctor multiple images of the same label, package, or flat texture so it can stitch them together, clean glare, and preserve readable text and flat colors.</p>
+          <ul class="feature-list">
+            <li>Add multiple label photos</li>
+            <li>Stitch sections into one long result</li>
+            <li>Clean reflections and lighting inconsistencies</li>
+            <li>Preserve text, logos, and flat-color label regions</li>
+            <li>Useful for packaging, product labels, and 3D texture references</li>
+          </ul>
+          <div class="feature-note">For now, the feature has been added to the main menu so its place in MeshDoctor is ready for the next build.</div>
+        </div>
       </div>
     </section>
 
@@ -214,11 +241,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.5.15</h2>
+    <h2>MeshDoctor v1.5.16</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.5.15:</strong> keeps solid-color document regions uniform, preserves gradients only where they actually exist in the source, and narrows Photo mode to faithful optical restoration of glare, reflections, fading, and print damage.</p>
+    <p><strong>v1.5.16:</strong> keeps solid-color document regions uniform, preserves gradients only where they actually exist in the source, and narrows Photo mode to faithful optical restoration of glare, reflections, fading, and print damage.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -246,8 +273,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.5.15"></script>
+  <script src="config.js?v=1.5.16"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.5.15"></script>
+  <script src="app.js?v=1.5.16"></script>
 </body>
 </html>
