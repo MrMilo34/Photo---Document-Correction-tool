@@ -24,7 +24,8 @@ let pdfUid = 0;
 let pdfDrag = null;
 let pdfSuppressClickUntil = 0;
 const SETTINGS_KEY = 'meshdoctor-settings-v1';
-let userSettings = { pdfFilename:'MeshDoctor-created', pdfOutput:'download' };
+let userSettings = { pdfFilename:'MeshDoctor-created', outputFolderName:'Downloads' };
+let outputDirHandle = null;
 
 
 let points = [];
@@ -38,7 +39,7 @@ let aiReferenceDataUrl = '';
 let aiReferenceName = '';
 let adjustedImage = null;
 let grayscaleImageCache = null;
-let currentMode = 'corrected';
+let currentMode = 'adjust';
 let aiRestoreChoice = null;
 let adjustTimer = null;
 const adjustments = { brightness:0, contrast:0, saturation:0, black:0, white:0 };
@@ -74,10 +75,69 @@ function saveSettings(){
   try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(userSettings)); }catch(err){ console.warn('Could not save settings', err); }
 }
 function syncSettingsUi(){
-  const name=$('settingsPdfName'), output=$('settingsPdfOutput');
+  const name=$('settingsPdfName');
   if(name) name.value=userSettings.pdfFilename||'MeshDoctor-created';
-  if(output) output.value=userSettings.pdfOutput||'download';
+  updateOutputFolderUi();
 }
+const OUTPUT_DB_NAME='meshdoctor-file-output';
+const OUTPUT_DB_STORE='handles';
+function openOutputDb(){
+  return new Promise((resolve,reject)=>{
+    if(!('indexedDB' in window)) return resolve(null);
+    const req=indexedDB.open(OUTPUT_DB_NAME,1);
+    req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains(OUTPUT_DB_STORE))req.result.createObjectStore(OUTPUT_DB_STORE);};
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+}
+async function rememberOutputHandle(handle){
+  try{const db=await openOutputDb();if(!db)return;await new Promise((resolve,reject)=>{const tx=db.transaction(OUTPUT_DB_STORE,'readwrite');tx.objectStore(OUTPUT_DB_STORE).put(handle,'root');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();}catch(err){console.warn('Could not remember output folder',err);}
+}
+async function restoreOutputHandle(){
+  try{const db=await openOutputDb();if(!db)return;const handle=await new Promise((resolve,reject)=>{const tx=db.transaction(OUTPUT_DB_STORE,'readonly');const req=tx.objectStore(OUTPUT_DB_STORE).get('root');req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);});db.close();if(handle){outputDirHandle=handle;userSettings.outputFolderName=handle.name||'Selected folder';updateOutputFolderUi();}}catch(err){console.warn('Could not restore output folder',err);}
+}
+async function ensureDirectoryPermission(handle,ask=false){
+  if(!handle)return false;
+  const opts={mode:'readwrite'};
+  try{if((await handle.queryPermission?.(opts))==='granted')return true;if(ask&&(await handle.requestPermission?.(opts))==='granted')return true;}catch(err){console.warn('Folder permission check failed',err);}return false;
+}
+function updateOutputFolderUi(){
+  const status=$('outputFolderStatus');if(!status)return;
+  if(outputDirHandle){status.textContent=`${outputDirHandle.name || 'Selected folder'} / MeshDoctor / Images + PDFs`;status.classList.add('ready');}
+  else{status.textContent='Downloads (default)';status.classList.remove('ready');}
+}
+async function chooseOutputFolder(){
+  if(typeof window.showDirectoryPicker!=='function'){toast('Folder selection is not available in this browser. Using Downloads.');return;}
+  try{
+    const handle=await window.showDirectoryPicker({mode:'readwrite'});
+    if(!(await ensureDirectoryPermission(handle,true)))throw new Error('Folder permission was not granted');
+    const md=await handle.getDirectoryHandle('MeshDoctor',{create:true});
+    await md.getDirectoryHandle('Images',{create:true});
+    await md.getDirectoryHandle('PDFs',{create:true});
+    outputDirHandle=handle;userSettings.outputFolderName=handle.name||'Selected folder';saveSettings();await rememberOutputHandle(handle);updateOutputFolderUi();toast('MeshDoctor output folders are ready.');
+  }catch(err){if(err?.name!=='AbortError'){console.warn(err);toast('Could not use that output folder.');}}
+}
+async function getOutputSubdirectory(kind,ask=false){
+  if(!outputDirHandle)return null;
+  if(!(await ensureDirectoryPermission(outputDirHandle,ask)))return null;
+  const md=await outputDirHandle.getDirectoryHandle('MeshDoctor',{create:true});
+  return await md.getDirectoryHandle(kind,{create:true});
+}
+function browserDownloadBlob(blob,fileName){
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+async function saveBlobToOutput(blob,fileName,kind){
+  try{
+    const dir=await getOutputSubdirectory(kind,true);
+    if(dir){const fh=await dir.getFileHandle(fileName,{create:true});const writable=await fh.createWritable();await writable.write(blob);await writable.close();toast(`Saved to MeshDoctor/${kind}.`);return true;}
+  }catch(err){console.warn('Folder save failed; falling back to Downloads',err);}
+  browserDownloadBlob(blob,fileName);toast('Saved to your downloads.');return false;
+}
+function getImageOutputBase(){
+  const input=$('imageOutputName');
+  return sanitizeFileName(input?.value||currentFileBase||'image','image');
+}
+function syncImageOutputName(){const input=$('imageOutputName');if(input)input.value=sanitizeFileName(currentFileBase||'image','image');}
+
 function openSettingsDialog(){ syncSettingsUi(); renderAiDiagnostics(); $('settingsDialog')?.showModal(); testAiConnection(); }
 function closeSettingsDialog(){ if($('settingsDialog')?.open) $('settingsDialog').close(); }
 function sanitizeFileName(name,fallback='MeshDoctor-created'){
@@ -913,11 +973,11 @@ function resetAdjustments(render=false){
   Object.keys(adjustments).forEach(k=>adjustments[k]=0);
   document.querySelectorAll('.mesh-slider').forEach(el=>setSliderValue(el,0,false));
   adjustedImage=null;
-  if(render&&currentMode==='adjust'&&correctedOriginal){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+  if(render&&currentMode==='adjust'&&correctedOriginal){correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);}
 }
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Correcting image…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='corrected';resetAdjustments(false);displayImage(correctedImage);setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);syncImageOutputName();setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
@@ -928,7 +988,7 @@ async function setMode(mode){
   if(mode==='bw'&&!grayscaleImageCache){busy(true,'Making grayscale image…');await new Promise(r=>setTimeout(r,30));}
   try{
     if(mode==='corrected'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(correctedImage);}
-    else if(mode==='adjust'){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+    else if(mode==='adjust'){correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);}
     else if(mode==='bw'){correctedImage ||= cleanupImage(correctedOriginal);grayscaleImageCache ||= grayscaleImage(correctedImage);displayImage(grayscaleImageCache);}
     else if(mode==='assist'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(aiAssistImage||correctedImage);}
     setModeButtons();
@@ -1131,7 +1191,7 @@ function initMeshSliders(){
 }
 function scheduleAdjustmentRender(){
   clearTimeout(adjustTimer);
-  adjustTimer=setTimeout(()=>{if(currentMode!=='adjust'||!correctedOriginal)return;adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);},55);
+  adjustTimer=setTimeout(()=>{if(currentMode!=='adjust'||!correctedOriginal)return;correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);},55);
 }
 
 function rotateSource(){
@@ -1397,38 +1457,25 @@ async function savePdf(){
     for(let i=0;i<pdfItems.length;i++){$('busyText').textContent=`Building PDF · ${i+1}/${pdfItems.length}`;pages.push(await pdfPageImage(pdfItems[i]));await new Promise(r=>setTimeout(r,0));}
     const pdf=buildImagePdf(pages);
     const fileName=`${sanitizeFileName(userSettings.pdfFilename,'MeshDoctor-created')}.pdf`;
-    const file=new File([pdf],fileName,{type:'application/pdf'});
-    if(userSettings.pdfOutput==='share' && navigator.canShare?.({files:[file]})){
-      try{
-        await navigator.share({files:[file], title:fileName.replace(/\.pdf$/,'')});
-        toast('PDF ready to share.');
-      }catch(err){
-        if(err?.name==='AbortError') toast('Share cancelled.');
-        else throw err;
-      }
-    }else{
-      const url=URL.createObjectURL(pdf),a=document.createElement('a');
-      a.href=url;a.download=fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
-      toast('PDF saved to your downloads.');
-    }
+    await saveBlobToOutput(pdf,fileName,'PDFs');
   }catch(err){console.error(err);toast('Could not build the PDF.');}
   finally{busy(false);}
 }
 
 function downloadCanvas(type='image/png'){
-  resultCanvas.toBlob(blob=>{if(!blob)return;const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${currentFileBase}-corrected.${type==='image/png'?'png':'jpg'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Saved to your downloads.');},type,type==='image/jpeg'?.94:undefined);
+  resultCanvas.toBlob(async blob=>{if(!blob)return;const ext=type==='image/png'?'png':'jpg';const fileName=`${getImageOutputBase()}.${ext}`;await saveBlobToOutput(blob,fileName,'Images');},type,type==='image/jpeg'?.94:undefined);
 }
 async function shareCanvas(){
-  resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${currentFileBase}-corrected.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
+  resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${getImageOutputBase()}.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
 }
 
 $('homeSettingsBtn')?.addEventListener('click',openSettingsDialog);
 $('testAiConnectionBtn')?.addEventListener('click',testAiConnection);
+$('chooseOutputFolderBtn')?.addEventListener('click',chooseOutputFolder);
 $('settingsCloseBtn')?.addEventListener('click',closeSettingsDialog);
 $('settingsCancelBtn')?.addEventListener('click',closeSettingsDialog);
 $('settingsSaveBtn')?.addEventListener('click',()=>{
   userSettings.pdfFilename=sanitizeFileName($('settingsPdfName')?.value,'MeshDoctor-created');
-  userSettings.pdfOutput=$('settingsPdfOutput')?.value==='share'?'share':'download';
   saveSettings();
   syncSettingsUi();
   closeSettingsDialog();
@@ -1503,8 +1550,8 @@ if($('pdfImportAdd')) $('pdfImportAdd').addEventListener('click',()=>closePdfImp
 if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.preventDefault();closePdfImport([]);});
 
 loadSettings();
-window.addEventListener('load',()=>{ syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide', stopHomeCameraBg);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopHomeCameraBg(); else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.16', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.5.17', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

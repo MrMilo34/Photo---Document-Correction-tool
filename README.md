@@ -1,17 +1,15 @@
-# MeshDoctor v1.5.16
+# MeshDoctor v1.5.17
 
-## What’s new in v1.5.16
-- Added **🏷️ Label Maker** to the main home-screen button list.
-- Added a dedicated **Label Maker** placeholder screen so the new tool has a visible place inside MeshDoctor while the stitching workflow is prepared.
-- The placeholder explains the planned use case: combining multiple photos of the same label / package / flat texture, cleaning glare, and stitching them into one cleaner final output.
+## What’s new
+- The correction result now opens on **Adjust** by default, with the adjustment panel immediately visible.
+- The old helper text below the correction modes is replaced by an **Image name** field. That name is used when saving PNG/JPG images.
+- Settings now has one output destination for both images and PDFs.
+- **Select Folder** uses the browser File System Access API when available. MeshDoctor creates `MeshDoctor/Images` and `MeshDoctor/PDFs` inside the selected folder and saves into those subfolders.
+- If no folder is selected, or the browser does not support writable folder picking, output continues to use **Downloads**.
+- The AI reference control is now a larger blue/purple button and is renamed **+ Add additional Reference Image**.
 
-## Planned direction for Label Maker
-The upcoming workflow is intended to support:
-- multiple source images
-- stitched label / panoramic output
-- glare and lighting cleanup
-- preservation of readable text, logos, and flat-color label regions
-- packaging, labels, and texture-reference use cases
+## Output-folder note
+Web browsers only allow direct folder writing after the user grants permission. On browsers/devices without `showDirectoryPicker`, MeshDoctor safely falls back to the normal Downloads behavior.
 
 ## Cache/version
-PWA cache key: `meshdoctor-v1.5.16`.
+PWA cache key: `meshdoctor-v1.5.17`.

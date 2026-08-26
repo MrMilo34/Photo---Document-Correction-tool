@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.5.16" />
-  <link rel="icon" href="icons/icon-192.png?v=1.5.16" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.16" />
-  <link rel="stylesheet" href="styles.css?v=1.5.16" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.5.17" />
+  <link rel="icon" href="icons/icon-192.png?v=1.5.17" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.5.17" />
+  <link rel="stylesheet" href="styles.css?v=1.5.17" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.5.16" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.5.17" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.5.16</div>
+      <div class="version-tag">release v1.5.17</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -177,7 +177,7 @@
             <span>Add another angle of the same photo or document to help AI recover glare-covered or blocked details.</span>
           </div>
           <div class="ai-reference-actions">
-            <label class="themed-secondary ai-reference-btn">＋ Add reference
+            <label class="ai-reference-btn">＋ Add additional Reference Image
               <input id="aiReferenceInput" type="file" accept="image/*" hidden />
             </label>
             <button id="aiReferenceClearBtn" class="secondary ai-reference-clear hidden" type="button">Remove</button>
@@ -187,7 +187,10 @@
         <div id="aiChoiceStatus" class="ai-choice-status">Automatic, Document, or Photo.</div>
       </section>
 
-      <div class="mode-tip">Photo restores real-world camera images. Document is for digital documents and screenshots. Automatic chooses for you.</div>
+      <label class="image-name-box" for="imageOutputName">
+        <span>Image name</span>
+        <input id="imageOutputName" type="text" maxlength="80" placeholder="image" />
+      </label>
 
       <div class="result-actions">
         <button id="shareBtn" class="themed-secondary">↗ Share</button>
@@ -202,7 +205,7 @@
     <div class="settings-head">
       <div>
         <h2>Settings</h2>
-        <p>AI connection status and PDF output preferences.</p>
+        <p>AI connection status and file output preferences.</p>
       </div>
       <button id="settingsCloseBtn" class="neon-icon-btn" type="button" aria-label="Close settings">✕</button>
     </div>
@@ -221,17 +224,15 @@
         <small id="settingsAiDetail" class="ai-detail">Test the connection to check Vercel, your API key, and GPT Image access without generating an image.</small>
       </div>
       <div class="settings-card">
-        <strong>Create a PDF Output</strong>
+        <strong>File Output</strong>
         <label class="settings-label">Default PDF file name
           <input id="settingsPdfName" type="text" maxlength="64" placeholder="MeshDoctor-created" />
         </label>
-        <label class="settings-label">After creating a PDF
-          <select id="settingsPdfOutput">
-            <option value="download">Save to device downloads</option>
-            <option value="share">Open the share sheet when available</option>
-          </select>
-        </label>
-        <small>Your PDF output area is your device downloads by default. If you choose Share, MeshDoctor will open the system share sheet when your device supports file sharing, so you can send or save the PDF somewhere else.</small>
+        <div class="settings-folder-row">
+          <span>Output folder</span>
+          <button id="chooseOutputFolderBtn" class="themed-secondary folder-select-btn" type="button">📁 Select Folder</button>
+          <small id="outputFolderStatus" class="output-folder-status">Downloads (default)</small>
+        </div>
       </div>
     </div>
     <div class="settings-actions">
@@ -241,11 +242,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.5.16</h2>
+    <h2>MeshDoctor v1.5.17</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.5.16:</strong> keeps solid-color document regions uniform, preserves gradients only where they actually exist in the source, and narrows Photo mode to faithful optical restoration of glare, reflections, fading, and print damage.</p>
+    <p><strong>v1.5.17:</strong> keeps solid-color document regions uniform, preserves gradients only where they actually exist in the source, and narrows Photo mode to faithful optical restoration of glare, reflections, fading, and print damage.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -273,8 +274,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.5.16"></script>
+  <script src="config.js?v=1.5.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.5.16"></script>
+  <script src="app.js?v=1.5.17"></script>
 </body>
 </html>
