@@ -1260,17 +1260,54 @@ async function gptRestoreImage(img,mode){
   }finally{clearTimeout(timer);}
 }
 
+function imageDataSignal(img){
+  if(!img?.data?.length)return{mean:0,std:0,opaque:0};
+  const d=img.data,step=Math.max(4,Math.floor(Math.sqrt((img.width*img.height)/16000))),vals=[];let sum=0,sum2=0,n=0,opaque=0;
+  for(let y=0;y<img.height;y+=step)for(let x=0;x<img.width;x+=step){const i=(y*img.width+x)*4,l=.299*d[i]+.587*d[i+1]+.114*d[i+2];sum+=l;sum2+=l*l;n++;if(d[i+3]>220)opaque++;}
+  const mean=n?sum/n:0,std=n?Math.sqrt(Math.max(0,sum2/n-mean*mean)):0;return{mean,std,opaque:n?opaque/n:0};
+}
+function labelAiTileUsable(restored,source){
+  const a=imageDataSignal(restored),b=imageDataSignal(source);
+  if(!restored?.width||!restored?.height||a.opaque<.92)return false;
+  if(a.mean<7&&b.mean>24)return false;
+  if(a.std<2.2&&b.std>9)return false;
+  return true;
+}
+function preserveLabelSourceDetail(source,restored){
+  const W=source.width,H=source.height,s=source.data,a=restored.data,out=new ImageData(W,H),d=out.data;
+  const lumAt=(x,y)=>{const i=(clamp(y,0,H-1)*W+clamp(x,0,W-1))*4;return .299*s[i]+.587*s[i+1]+.114*s[i+2];};
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const p=(y*W+x)*4,lum=.299*s[p]+.587*s[p+1]+.114*s[p+2];
+    const edge=Math.min(90,Math.abs(lum-lumAt(x-1,y))+Math.abs(lum-lumAt(x+1,y))+Math.abs(lum-lumAt(x,y-1))+Math.abs(lum-lumAt(x,y+1)));
+    // Keep printed strokes, borders, barcodes and small type anchored to the photographed
+    // pixels.  Let AI contribute more in flat/glare-heavy regions where reconstruction is useful.
+    let keep=clamp(.26+edge/90*.56+(lum<145?.12:0),.24,.88);
+    if(lum>224&&edge<12)keep=.20;
+    d[p]=s[p]*keep+a[p]*(1-keep);d[p+1]=s[p+1]*keep+a[p+1]*(1-keep);d[p+2]=s[p+2]*keep+a[p+2]*(1-keep);d[p+3]=255;
+  }
+  return out;
+}
 async function gptRestorePanoramaTiled(img,mode='document'){
   const src=document.createElement('canvas');src.width=img.width;src.height=img.height;src.getContext('2d').putImageData(img,0,0);
-  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.55))),overlap=Math.max(80,Math.round(maxTileW*.16)),step=Math.max(320,maxTileW-overlap),positions=[];
+  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.45))),overlap=Math.max(96,Math.round(maxTileW*.20)),step=Math.max(300,maxTileW-overlap),positions=[];
   for(let x=0;x<img.width;x+=step){let w=Math.min(maxTileW,img.width-x);if(img.width-(x+w)>0&&img.width-(x+w)<overlap){w=img.width-x;}positions.push({x,w});if(x+w>=img.width)break;}
   const out=document.createElement('canvas');out.width=img.width;out.height=img.height;const ox=out.getContext('2d');
+  // Never start a tiled restore on a transparent canvas.  If a later network/model tile
+  // fails, the original corrected label remains underneath instead of exporting a black half.
+  ox.drawImage(src,0,0);
   for(let i=0;i<positions.length;i++){
     const {x,w}=positions[i];$('busyText').textContent=`AI polishing label section · ${i+1}/${positions.length}`;
-    const tc=document.createElement('canvas');tc.width=w;tc.height=img.height;tc.getContext('2d').drawImage(src,x,0,w,img.height,0,0,w,img.height);let tile=tc.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,img.height),restored;
+    const tc=document.createElement('canvas');tc.width=w;tc.height=img.height;const tcx=tc.getContext('2d',{willReadFrequently:true});tcx.drawImage(src,x,0,w,img.height,0,0,w,img.height);const tile=tcx.getImageData(0,0,w,img.height);let restored;
     try{restored=await gptRestoreImage(tile,mode);}catch(err){console.warn('AI tile restore fallback',i,err);restored=cleanupImage(tile);}
-    const rc=document.createElement('canvas');rc.width=restored.width;rc.height=restored.height;rc.getContext('2d').putImageData(restored,0,0);const normalized=document.createElement('canvas');normalized.width=w;normalized.height=img.height;normalized.getContext('2d').drawImage(rc,0,0,w,img.height);
-    if(i===0){ox.drawImage(normalized,x,0);}else{const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalized,0,0);tx.globalCompositeOperation='destination-in';const leftOverlap=Math.min(overlap,w),g=tx.createLinearGradient(0,0,leftOverlap,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,leftOverlap,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);}
+    const rc=document.createElement('canvas');rc.width=restored.width;rc.height=restored.height;rc.getContext('2d').putImageData(restored,0,0);
+    const normalizedCanvas=document.createElement('canvas');normalizedCanvas.width=w;normalizedCanvas.height=img.height;const ncx=normalizedCanvas.getContext('2d',{willReadFrequently:true});ncx.drawImage(rc,0,0,w,img.height);
+    let normalized=ncx.getImageData(0,0,w,img.height);
+    if(!labelAiTileUsable(normalized,tile)){console.warn('Rejected unusable AI label tile',i);normalized=cleanupImage(tile);}
+    else normalized=preserveLabelSourceDetail(tile,normalized);
+    ncx.putImageData(normalized,0,0);
+    if(i===0){ox.drawImage(normalizedCanvas,x,0);}else{
+      const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalizedCanvas,0,0);tx.globalCompositeOperation='destination-in';const leftOverlap=Math.min(overlap,w),g=tx.createLinearGradient(0,0,leftOverlap,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.52,'rgba(0,0,0,.52)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,leftOverlap,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);
+    }
     await new Promise(r=>setTimeout(r,0));
   }
   setAiEngineStatus('ready',`AI Image · tiled ${mode} restore complete`);return out.getContext('2d',{willReadFrequently:true}).getImageData(0,0,out.width,out.height);
@@ -1808,7 +1845,12 @@ async function labelAreaNext(){saveCurrentLabelMapView();if(labelAreaIndex<label
 async function labelAreaPrevious(){saveCurrentLabelMapView();if(labelAreaIndex>0){labelAreaIndex--;await renderLabelArea();}}
 function applyLabelAreaRemaining(){const item=labelItems[labelAreaIndex];if(!item)return;for(let i=labelAreaIndex+1;i<labelItems.length;i++){labelItems[i].quad=cloneQuad(item.quad||defaultLabelMesh());labelItems[i].rotation=item.rotation||0;labelItems[i].mapHistory=[];}toast('Mesh and straightening copied to remaining images.');}
 function sampleChain(points,t){
-  if(points.length===1)return points[0];const x=clamp(t,0,1)*(points.length-1),i=Math.min(points.length-2,Math.floor(x)),f=x-i,a=points[i],b=points[i+1];return{x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f};
+  // Mesh points are user-placed and are rarely spaced perfectly evenly.  Parameterizing
+  // by point index stretches short segments and compresses long ones, which shows up as
+  // warped logos/text after a cylindrical label is flattened.  Walk the actual edge
+  // distance instead so every output column/row represents an equal distance on the label.
+  if(!points?.length)return{x:0,y:0};
+  return samplePolyline(points,clamp(t,0,1));
 }
 function coonsPoint(mesh,u,v){
   const {top,right,bottom,left}=meshChains(mesh),tl=top[0],tr=top[top.length-1],bl=bottom[0],br=bottom[bottom.length-1];
@@ -1836,31 +1878,73 @@ function labelMatchGrid(canvas,targetH=112){
   return{w,h,g,gx,gy,scale};
 }
 function labelOverlapScore(A,B,o,dy){
-  let n=0,sa=0,sb=0,saa=0,sbb=0,sab=0,edge=0;
-  const y0=Math.max(3,Math.round(Math.min(A.h,B.h)*.08)),y1=Math.min(A.h,B.h)-y0;
-  for(let y=y0;y<y1;y+=2){
+  let n=0,sa=0,sb=0,saa=0,sbb=0,sab=0;
+  let ngx=0,sax=0,sbx=0,saax=0,sbbx=0,sabx=0;
+  let ngy=0,say=0,sby=0,saay=0,sbby=0,saby=0;
+  let edgeDiff=0,edgeEnergy=0;
+  const yPad=Math.max(3,Math.round(Math.min(A.h,B.h)*.07)),y1=Math.min(A.h,B.h)-yPad;
+  for(let y=yPad;y<y1;y+=2){
     const by=y+dy;if(by<2||by>=B.h-2)continue;
     for(let x=2;x<o-2;x+=2){
       const ai=y*A.w+(A.w-o+x),bi=by*B.w+x,a=A.g[ai],b=B.g[bi];
-      sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b;
-      edge+=Math.abs(A.gx[ai]-B.gx[bi])*.62+Math.abs(A.gy[ai]-B.gy[bi])*.38;n++;
+      sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b;n++;
+      const ax=A.gx[ai],bx=B.gx[bi],ay=A.gy[ai],byy=B.gy[bi];
+      const ex=Math.abs(ax)+Math.abs(bx),ey=Math.abs(ay)+Math.abs(byy);
+      // Only let real structure (text, borders, logos) vote strongly.  Flat white label
+      // areas are common and otherwise make several wrong overlaps look equally good.
+      if(ex>8){sax+=ax;sbx+=bx;saax+=ax*ax;sbbx+=bx*bx;sabx+=ax*bx;ngx++;}
+      if(ey>8){say+=ay;sby+=byy;saay+=ay*ay;sbby+=byy*byy;saby+=ay*byy;ngy++;}
+      edgeDiff+=(Math.abs(ax-bx)*.62+Math.abs(ay-byy)*.38);
+      edgeEnergy+=Math.min(80,(Math.abs(ax)+Math.abs(bx)+Math.abs(ay)+Math.abs(byy))*.25);
     }
   }
-  if(n<24)return{score:Infinity,corr:-1};
-  const cov=sab-sa*sb/n,va=Math.max(1,saa-sa*sa/n),vb=Math.max(1,sbb-sb*sb/n),corr=clamp(cov/Math.sqrt(va*vb),-1,1),edgeMean=edge/n;
-  return{score:(1-corr)*34+edgeMean*.12,corr};
+  if(n<28)return{score:Infinity,corr:-1,edgeCorr:-1,quality:-1,edgeEnergy:0};
+  const corrOf=(count,s1,s2,ss1,ss2,s12)=>{
+    if(count<12)return 0;
+    const cov=s12-s1*s2/count,v1=Math.max(1,ss1-s1*s1/count),v2=Math.max(1,ss2-s2*s2/count);
+    return clamp(cov/Math.sqrt(v1*v2),-1,1);
+  };
+  const corr=corrOf(n,sa,sb,saa,sbb,sab),cx=corrOf(ngx,sax,sbx,saax,sbbx,sabx),cy=corrOf(ngy,say,sby,saay,sbby,saby);
+  const edgeCorr=(cx+cy)*.5,meanEdgeDiff=edgeDiff/n,info=edgeEnergy/n;
+  const quality=corr*.52+edgeCorr*.48;
+  // Normalized correlation handles exposure differences; signed edge correlation keeps
+  // repeated bright/blank packaging from being mistaken for the same physical section.
+  const lowInfoPenalty=info<4?(4-info)*2.4:0;
+  return{score:(1-corr)*20+(1-edgeCorr)*24+meanEdgeDiff*.075+lowInfoPenalty,corr,edgeCorr,quality,edgeEnergy:info};
 }
-function estimateLabelAlignment(a,b){
-  const A=labelMatchGrid(a),B=labelMatchGrid(b),minW=Math.min(A.w,B.w),minO=Math.max(8,Math.round(minW*.07)),maxO=Math.max(minO+2,Math.round(minW*.82)),maxDy=Math.max(7,Math.round(Math.min(A.h,B.h)*.11));let best={score:Infinity,o:minO,dy:0,corr:-1},runner=Infinity;
+function estimateLabelAlignment(a,b,{closure=false}={}){
+  const A=labelMatchGrid(a),B=labelMatchGrid(b),minW=Math.min(A.w,B.w);
+  const minFrac=closure?.07:.09,maxFrac=closure?.72:.62;
+  const minO=Math.max(8,Math.round(minW*minFrac)),maxO=Math.max(minO+2,Math.round(minW*maxFrac));
+  const maxDy=Math.max(7,Math.round(Math.min(A.h,B.h)*(closure?.13:.11)));
+  let best={score:Infinity,o:minO,dy:0,corr:-1,edgeCorr:-1,quality:-1,edgeEnergy:0},runner=Infinity;
   for(let o=minO;o<=maxO;o+=2){
+    const coverage=o/minW;
     for(let dy=-maxDy;dy<=maxDy;dy++){
-      const m=labelOverlapScore(A,B,o,dy),coverage=o/minW,score=m.score*(1.018-Math.min(.018,coverage*.024));
-      if(score<best.score){runner=best.score;best={score,o,dy,corr:m.corr};}else if(score<runner&&Math.abs(o-best.o)>2)runner=score;
+      const m=labelOverlapScore(A,B,o,dy);
+      // Adjacent handheld shots normally overlap enough to identify the seam, but a huge
+      // overlap is risky on packaging with repeating benefit boxes.  Keep a soft physical
+      // prior while still allowing a very strong real match to win.
+      const prior=(coverage<.14?(.14-coverage)*16:0)+(coverage>.55?(coverage-.55)*18:0);
+      const score=m.score+prior;
+      if(score<best.score-.16||(Math.abs(score-best.score)<=.16&&o>best.o)){
+        runner=best.score;best={...m,score,o,dy};
+      }else if(score<runner&&Math.abs(o-best.o)>2) runner=score;
     }
   }
-  const scaleX=a.width/A.w,scaleY=a.height/A.h,confidence=runner<Infinity?clamp((runner-best.score)/Math.max(1,runner),0,1):0;
-  const fallback=Math.round(Math.min(a.width,b.width)*.18),weak=!Number.isFinite(best.score)||best.corr<.12||(best.score>47&&confidence<.02),overlap=weak?fallback:Math.round(best.o*scaleX),yOffset=weak?0:Math.round(best.dy*scaleY);
-  return{overlap:clamp(overlap,Math.round(Math.min(a.width,b.width)*.07),Math.round(Math.min(a.width,b.width)*.82)),yOffset,score:best.score,confidence,corr:best.corr,fallback:weak};
+  const scaleX=a.width/A.w,scaleY=a.height/A.h;
+  const separation=runner<Infinity?clamp((runner-best.score)/Math.max(1,Math.abs(runner)),0,1):0;
+  const confidence=clamp(separation*.38+Math.max(0,best.quality)*.62,0,1);
+  const fallback=Math.round(Math.min(a.width,b.width)*.20);
+  const strong=Number.isFinite(best.score)&&(
+    (best.quality>.24&&best.corr>.20&&best.edgeCorr>.08) ||
+    (best.corr>.58&&best.edgeEnergy>3.2)
+  );
+  const overlap=strong?Math.round(best.o*scaleX):fallback,yOffset=strong?Math.round(best.dy*scaleY):0;
+  return{
+    overlap:clamp(overlap,Math.round(Math.min(a.width,b.width)*minFrac),Math.round(Math.min(a.width,b.width)*maxFrac)),
+    yOffset,score:best.score,confidence,corr:best.corr,edgeCorr:best.edgeCorr,quality:best.quality,edgeEnergy:best.edgeEnergy,fallback:!strong
+  };
 }
 function labelSafeCanvasScale(width,height){
   const maxW=4200,maxH=1800,maxPixels=6500000;
@@ -1869,15 +1953,41 @@ function labelSafeCanvasScale(width,height){
 async function stitchLabelPieces(pieces){
   const valid=pieces.filter(p=>p?.width>1&&p?.height>1);if(!valid.length)throw new Error('No label pieces');
   if(valid.length===1){const one=document.createElement('canvas'),s=labelSafeCanvasScale(valid[0].width,valid[0].height);one.width=Math.max(1,Math.round(valid[0].width*s));one.height=Math.max(1,Math.round(valid[0].height*s));one.getContext('2d').drawImage(valid[0],0,0,one.width,one.height);return one;}
-  const aligns=[];for(let i=1;i<valid.length;i++){await new Promise(r=>setTimeout(r,0));aligns.push(estimateLabelAlignment(valid[i-1],valid[i]));}
-  const xs=[0],ys=[0];for(let i=1;i<valid.length;i++){const prev=valid[i-1],a=aligns[i-1];xs[i]=xs[i-1]+prev.width-a.overlap;ys[i]=ys[i-1]+a.yOffset;}
-  const minY=Math.min(...ys),maxY=Math.max(...valid.map((p,i)=>ys[i]+p.height)),rawW=Math.max(...valid.map((p,i)=>xs[i]+p.width)),rawH=Math.max(1,maxY-minY),s=labelSafeCanvasScale(rawW,rawH);
+  const aligns=[];
+  for(let i=1;i<valid.length;i++){
+    await new Promise(r=>setTimeout(r,0));
+    aligns.push(estimateLabelAlignment(valid[i-1],valid[i]));
+  }
+  const xs=[0],ys=[0];
+  for(let i=1;i<valid.length;i++){
+    const prev=valid[i-1],a=aligns[i-1];
+    xs[i]=xs[i-1]+prev.width-a.overlap;
+    ys[i]=ys[i-1]+a.yOffset;
+  }
+  const minY=Math.min(...ys),maxY=Math.max(...valid.map((p,i)=>ys[i]+p.height));
+  const untrimmedW=Math.max(...valid.map((p,i)=>xs[i]+p.width)),rawH=Math.max(1,maxY-minY);
+
+  // A bottle/tub label is normally a closed 360° strip.  If the last photograph clearly
+  // returns into the first photograph, remove that closing overlap instead of exporting
+  // the beginning of the label a second time at the far right.
+  let circularTrim=0;
+  if(valid.length>=3){
+    const closure=estimateLabelAlignment(valid[valid.length-1],valid[0],{closure:true});
+    const verticalClose=Math.abs((ys[ys.length-1]||0)+closure.yOffset)<=Math.max(26,rawH*.09);
+    const closureStrong=!closure.fallback&&closure.quality>.36&&closure.corr>.30&&verticalClose;
+    if(closureStrong){
+      const maxTrim=Math.round(valid[valid.length-1].width*.58);
+      circularTrim=clamp(closure.overlap,0,maxTrim);
+    }
+  }
+  const rawW=Math.max(1,untrimmedW-circularTrim),s=labelSafeCanvasScale(rawW,rawH);
   const out=document.createElement('canvas');out.width=Math.max(1,Math.round(rawW*s));out.height=Math.max(1,Math.round(rawH*s));const ctx=out.getContext('2d');
   const drawPiece=(p,i,blend)=>{
     const dx=Math.round(xs[i]*s),dy=Math.round((ys[i]-minY)*s),dw=Math.max(1,Math.round(p.width*s)),dh=Math.max(1,Math.round(p.height*s));
+    if(dx>=out.width)return;
     if(!blend){ctx.drawImage(p,dx,dy,dw,dh);return;}
     const o=Math.max(1,Math.round(aligns[i-1].overlap*s)),tmp=document.createElement('canvas');tmp.width=dw;tmp.height=dh;const tx=tmp.getContext('2d');tx.drawImage(p,0,0,dw,dh);tx.globalCompositeOperation='destination-in';
-    const g=tx.createLinearGradient(0,0,dw,0),stop=clamp(o/Math.max(1,dw),.025,.95);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(clamp(stop*.42,.01,.9),'rgba(0,0,0,.22)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,dw,dh);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,dx,dy);
+    const g=tx.createLinearGradient(0,0,dw,0),stop=clamp(o/Math.max(1,dw),.025,.95);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(clamp(stop*.35,.01,.9),'rgba(0,0,0,.18)');g.addColorStop(stop,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,dw,dh);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,dx,dy);
   };
   drawPiece(valid[0],0,false);for(let i=1;i<valid.length;i++){drawPiece(valid[i],i,true);await new Promise(r=>setTimeout(r,0));}
   return out;

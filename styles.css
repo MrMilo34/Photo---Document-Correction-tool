@@ -247,7 +247,7 @@ body.pdf-mode .pdf-save{display:block}
 #shapeView:not(.label-mesh-mode) .mesh-move-all,#shapeView:not(.label-mesh-mode) .label-rotation-panel{display:none!important}
 @media(min-width:800px){.label-rotation-panel{left:max(12px,calc((100vw - 900px)/2));right:max(12px,calc((100vw - 900px)/2));}}
 
-/* Label Maker v1.6.3 mapping controls */
+/* Label Maker v1.6.4 mapping controls */
 .label-area-stage{touch-action:none}
 #labelAreaCanvas{transform-origin:center center;will-change:transform;touch-action:none}
 .label-map-rotation{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
@@ -261,7 +261,7 @@ body.pdf-mode .pdf-save{display:block}
 #shapeView.label-mesh-mode .mesh-move-all,#shapeView.label-mesh-mode .label-rotation-panel{display:none!important}
 
 
-/* ===== MeshDoctor v1.6.3 Label project + precision mapping ===== */
+/* ===== MeshDoctor v1.6.4 Label project + precision mapping ===== */
 .label-resume-project{margin-top:10px;min-height:48px;border-radius:15px;width:min(100%,280px)}
 .label-resume-meta{display:block;margin-top:7px;font-size:9.5px;color:#8296a8;text-align:center}
 .label-map-edit-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}

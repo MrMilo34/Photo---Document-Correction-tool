@@ -1,26 +1,18 @@
-# MeshDoctor v1.6.3
+# MeshDoctor v1.6.4
 
-## What’s new in v1.6.3
-- **Save + resume Label Maker projects.** The mapping screen now has a Save button beside Undo. A saved project keeps the source images, image order, mesh points, Straighten rotation, zoom/pan view, current image, and recent mesh undo history in IndexedDB.
-- The Label Maker start screen now shows **Continue Saved Project** under Add Images whenever a saved project exists.
-- **Precision point movement is back.** Dragging a label mesh point moves at reduced speed and opens the circular magnifier so you can place the point without your finger covering the edge.
-- **True 4-corner start.** Each source now begins with only the four pink corner points. Tap an edge to add a blue point only where the label actually curves; optional points can be selected and removed.
-- **Stitching is more resilient.** Overlap matching now uses normalized image-detail correlation plus edge comparison, searches vertical offset and a wider overlap range, and falls back to a safe overlap stitch if recognition itself fails.
-- **Lower mobile memory pressure.** Source flattening and panorama allocation are capped before the large canvas is created, which avoids a common Android canvas/memory failure that could previously end with “Could not stitch these label images.”
-- The final stitched-label perimeter check, Adjust / Grayscale / Corrected / AI Assisted workflow, tiled wide-label AI polish, and single filename save remain intact.
+## Label Maker reliability update
 
-## Label Maker workflow
-1. Add and reorder source photos, or continue the last saved Label Maker project.
-2. Start each source with 4 corners; add blue edge points only where the container curves.
-3. Use the magnifier/reduced-speed drag, zoom/pan, whole-mesh move, and Straighten to map each source.
-4. Save the project at any time from the mapping screen.
-5. MeshDoctor recognizes neighboring content and stitches the label, with a safe fallback path if recognition is weak or fails.
-6. Check the stitched panorama with the final perimeter mesh.
-7. Correct the mesh and use the normal MeshDoctor Adjust / AI Assisted tools.
-8. Enter the Image name and Save PNG.
+This build focuses on the two problems seen in the latest cylindrical-label test: incorrect/repeated stitch regions and a wide AI-polished export that could contain only the first tile while the rest of the canvas became black.
 
-## AI backend
-The secure endpoint remains `api/ai-correct.js`. Wide-label AI polishing is coordinated by the app using overlapping document-restoration tiles, so no new Vercel environment variables are required.
+### Changes
 
-## Cache/version
-PWA cache key: `meshdoctor-v1.6.3`.
+- **Distance-aware label de-warping** — added mesh points are now interpolated by their real distance along the curved label edge instead of assuming every point is evenly spaced. This reduces horizontal stretching/compression of text, logos and boxes.
+- **Structure-aware overlap recognition** — stitching compares grayscale content plus signed horizontal/vertical edge structure, giving text, borders, logos and barcodes more influence than blank or repetitive packaging backgrounds.
+- **Safer overlap bounds and confidence fallback** — ambiguous matches no longer get to choose extreme overlap values as easily.
+- **360° wrap closure detection** — when the final photograph clearly returns into the first photograph, the repeated closing section is trimmed instead of exported twice.
+- **Wide-label AI tile safety** — the corrected source is drawn underneath every AI tile first. A failed or unusable AI tile therefore falls back to the source/local cleanup instead of leaving a black half.
+- **AI tile validation** — near-empty/black model tiles are rejected automatically.
+- **Print-detail preservation** — AI polish is blended more conservatively around text, barcodes, borders and other high-frequency printed detail while still allowing stronger cleanup in glare-heavy flat areas.
+- Keeps the v1.6.3 **Save Project**, **Continue Last Project**, **precision magnifier**, reduced-speed point movement, 4-corner start, added blue mesh points, center move handle and Straighten controls.
+
+PWA cache key: `meshdoctor-v1.6.4`.
