@@ -1664,41 +1664,67 @@ function getLabelCameraEditableRefs(){
   return [...Array(5)].flatMap((_,i)=>[{row:'top',i},{row:'bottom',i}]);
 }
 function labelCameraPointToPixel(ref,rect){const p=labelCameraGuideState.points[ref.row][ref.i];return{x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h};}
-function labelCameraGuideLeftX(){
-  const s=labelCameraGuideState;if(!s)return 0;
-  return clamp((s.points.top[0].x+s.points.bottom[0].x)/2,0,.44);
+function labelCameraGuideLocalBounds(){
+  const s=labelCameraGuideState;if(!s)return {left:0,right:1,top:.12,bottom:.88};
+  const all=[...s.points.top,...s.points.bottom];
+  return {
+    left:Math.min(...all.map(p=>p.x)),
+    right:Math.max(...all.map(p=>p.x)),
+    top:Math.min(...all.map(p=>p.y)),
+    bottom:Math.max(...all.map(p=>p.y))
+  };
 }
-function setLabelCameraGuideWidth(newLeft){
+function scaleLabelCameraGuide(edge,value){
   const s=labelCameraGuideState;if(!s)return;
-  const oldL=labelCameraGuideLeftX(),oldR=1-oldL;
-  const nextL=clamp(newLeft,.02,.44),nextR=1-nextL;
-  const oldSpan=Math.max(.04,oldR-oldL),nextSpan=Math.max(.04,nextR-nextL);
-  for(const rowName of ['top','bottom']){
-    const row=s.points[rowName];
-    row.forEach((p,i)=>{
-      const u=clamp((p.x-oldL)/oldSpan,0,1);
-      p.x=nextL+u*nextSpan;
-    });
-    row[0].x=nextL; row[4].x=nextR; row[2].x=.5;
+  const b=labelCameraGuideLocalBounds(),minSpan=.08;
+  const rows=['top','bottom'];
+  if(edge==='left'||edge==='right'){
+    let nextL=b.left,nextR=b.right;
+    if(s.mirror){
+      const center=.5;
+      const half=edge==='left'?center-clamp(value,.01,center-minSpan/2):clamp(value,center+minSpan/2,.99)-center;
+      const h=clamp(half,minSpan/2,.49);nextL=center-h;nextR=center+h;
+    }else if(edge==='left') nextL=clamp(value,.01,b.right-minSpan);
+    else nextR=clamp(value,b.left+minSpan,.99);
+    const oldSpan=Math.max(minSpan,b.right-b.left),nextSpan=Math.max(minSpan,nextR-nextL);
+    rows.forEach(name=>s.points[name].forEach(p=>{const u=(p.x-b.left)/oldSpan;p.x=nextL+u*nextSpan;}));
+    if(s.mirror)syncLabelCameraMirror();
+    return;
   }
-  if(s.mirror)syncLabelCameraMirror();
+  let nextT=b.top,nextB=b.bottom;
+  if(edge==='top')nextT=clamp(value,.01,b.bottom-minSpan);
+  else nextB=clamp(value,b.top+minSpan,.99);
+  const oldSpan=Math.max(minSpan,b.bottom-b.top),nextSpan=Math.max(minSpan,nextB-nextT);
+  rows.forEach(name=>s.points[name].forEach(p=>{const u=(p.y-b.top)/oldSpan;p.y=nextT+u*nextSpan;}));
 }
 function setLabelCameraPoint(ref,nx,ny){
   const s=labelCameraGuideState;if(!s)return;
   const row=s.points[ref.row];
-  nx=clamp(nx,0,1); ny=clamp(ny, ref.row==='top'? .04 :.60, ref.row==='top'? .42 :.96);
-  if(s.mirror){
-    if(ref.i===0){
-      setLabelCameraGuideWidth(nx);
-      row[0].y=ny;
-      syncLabelCameraMirror();
-      return;
-    }
-    if(ref.i===1) nx=clamp(nx,labelCameraGuideLeftX()+.04,.46);
-    if(ref.i===2) nx=.5;
-  }
+  nx=clamp(nx,.01,.99); ny=clamp(ny,.02,.98);
+  // The mesh dots now reshape only their local contour. Overall size is controlled by the pink chevron handles.
+  if(ref.i===0)nx=clamp(nx,.01,Math.max(.02,row[1].x-.025));
+  else if(ref.i===1)nx=clamp(nx,row[0].x+.025,.475);
+  else if(ref.i===2)nx=.5;
+  else if(ref.i===3)nx=clamp(nx,.525,row[4].x-.025);
+  else if(ref.i===4)nx=clamp(nx,row[3].x+.025,.99);
   row[ref.i]={...row[ref.i],x:nx,y:ny};
-  if(s.mirror) syncLabelCameraMirror();
+  if(s.mirror)syncLabelCameraMirror();
+}
+function getLabelCameraScaleHandles(canvas){
+  const rect=getLabelCameraGuideRect(canvas),b=labelCameraGuideLocalBounds();
+  const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
+  const dpr=Math.max(1,window.devicePixelRatio||1),cx=(left+right)/2,cy=(top+bottom)/2,offset=Math.max(24*dpr,canvas.width*.018);
+  return [
+    {edge:'left',x:left-offset,y:cy,angle:0},
+    {edge:'right',x:right+offset,y:cy,angle:Math.PI},
+    {edge:'top',x:cx,y:top-offset,angle:Math.PI/2},
+    {edge:'bottom',x:cx,y:bottom+offset,angle:-Math.PI/2}
+  ];
+}
+function labelCameraNearestScaleHandle(x,y){
+  const canvas=resizeLabelCameraOverlay();if(!canvas)return null;
+  let best=null,bd=Infinity;for(const h of getLabelCameraScaleHandles(canvas)){const d=Math.hypot(h.x-x,h.y-y);if(d<bd){bd=d;best=h;}}
+  return bd<=30*(window.devicePixelRatio||1)?best:null;
 }
 function resizeLabelCameraOverlay(){
   const canvas=$('labelCameraOverlay'); if(!canvas)return null;
@@ -1714,7 +1740,7 @@ function updateLabelCameraUi(){
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Drag either outside pink edge inward to set a narrow capture width, shape the curved guide, then take the first photo.';
+    help.textContent='Use the neon pink › handles to resize the capture area. Drag the mesh dots only to shape the label contour, then take the first photo.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
@@ -1731,6 +1757,10 @@ function drawLabelCameraOverlay(){
   const botPts=s.points.bottom.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
   ctx.save(); ctx.fillStyle='rgba(53,207,255,.05)'; ctx.strokeStyle='rgba(83,225,255,.95)'; ctx.lineWidth=Math.max(2,canvas.width*.0018); ctx.shadowColor='rgba(53,207,255,.45)'; ctx.shadowBlur=16; ctx.beginPath(); smoothPath(ctx,topPts); for(let i=botPts.length-1;i>=0;i--){const p=botPts[i]; if(i===botPts.length-1) ctx.lineTo(p.x,p.y); else {const prev=botPts[i+1],mx=(prev.x+p.x)/2,my=(prev.y+p.y)/2; ctx.quadraticCurveTo(prev.x,prev.y,mx,my);} } if(botPts.length) ctx.lineTo(botPts[0].x,botPts[0].y); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
   ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=rect.x+rect.w*.5; ctx.beginPath(); ctx.moveTo(cx,rect.y+rect.h*.08); ctx.lineTo(cx,rect.y+rect.h*.92); ctx.stroke(); ctx.restore();
+  // Dedicated scale handles. The mesh dots are now free to reshape the contour without resizing the whole guide.
+  for(const h of getLabelCameraScaleHandles(canvas)){
+    ctx.save();ctx.translate(h.x,h.y);ctx.rotate(h.angle);ctx.shadowColor='rgba(255,79,227,.92)';ctx.shadowBlur=Math.max(14,canvas.width*.012);ctx.fillStyle='#ff4fe3';ctx.font=`900 ${Math.max(32*(window.devicePixelRatio||1),canvas.width*.028)}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('›',0,-1);ctx.restore();
+  }
   const editable=new Set(getLabelCameraEditableRefs().map(ref=>`${ref.row}:${ref.i}`));
   [...s.points.top.map((p,i)=>({row:'top',i,p})),...s.points.bottom.map((p,i)=>({row:'bottom',i,p}))].forEach(ref=>{ const x=rect.x+ref.p.x*rect.w,y=rect.y+ref.p.y*rect.h,active=editable.has(`${ref.row}:${ref.i}`),r=active?Math.max(8,canvas.width*.006):Math.max(6,canvas.width*.0048); ctx.beginPath(); ctx.fillStyle=active?'#6fb5ff':'#7e8ca5'; if(ref.i===0||ref.i===4) ctx.fillStyle='#ff73ee'; if(ref.i===2) ctx.fillStyle=active?'#9fe7ff':'#7e8ca5'; ctx.shadowColor='rgba(255,79,227,.30)'; ctx.shadowBlur=active?10:0; ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.lineWidth=active?2:1.2; ctx.strokeStyle=active?'rgba(235,247,255,.95)':'rgba(255,255,255,.35)'; ctx.stroke(); });
   if(s.prevStrip){ ctx.save(); ctx.font=`${Math.max(12,canvas.width*.011)}px system-ui, sans-serif`; ctx.fillStyle='rgba(230,244,255,.92)'; ctx.fillText('Ghosted overlap',rect.x+12,rect.y+rect.h*.20); ctx.restore(); }
@@ -1788,8 +1818,18 @@ function labelCameraEventPos(ev){
   return {x:(ev.clientX-r.left)*(canvas.width/r.width),y:(ev.clientY-r.top)*(canvas.height/r.height)};
 }
 function labelCameraNearestRef(x,y){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay();if(!s||!canvas)return null;const rect=getLabelCameraGuideRect(canvas);let best=null,bd=Infinity;for(const ref of getLabelCameraEditableRefs()){const p=labelCameraPointToPixel(ref,rect),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=ref;}}return bd<=42*(window.devicePixelRatio||1)?best:null;}
-function labelCameraPointerDown(ev){const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;try{canvas.setPointerCapture(ev.pointerId);}catch{}const ref=labelCameraNearestRef(pos.x,pos.y);if(ref){s.dragging={pointerId:ev.pointerId,ref};ev.preventDefault();}}
-function labelCameraPointerMove(ev){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos||!s.dragging||s.dragging.pointerId!==ev.pointerId)return;const rect=getLabelCameraGuideRect(canvas),nx=clamp((pos.x-rect.x)/rect.w,0,1),ny=clamp((pos.y-rect.y)/rect.h,0,1);setLabelCameraPoint(s.dragging.ref,nx,ny);drawLabelCameraOverlay();ev.preventDefault();}
+function labelCameraPointerDown(ev){
+  const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;try{canvas.setPointerCapture(ev.pointerId);}catch{}
+  const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y);if(scaleHandle){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();return;}
+  const ref=labelCameraNearestRef(pos.x,pos.y);if(ref){s.dragging={pointerId:ev.pointerId,type:'point',ref};ev.preventDefault();}
+}
+function labelCameraPointerMove(ev){
+  const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos||!s.dragging||s.dragging.pointerId!==ev.pointerId)return;
+  const rect=getLabelCameraGuideRect(canvas),nx=clamp((pos.x-rect.x)/rect.w,0,1),ny=clamp((pos.y-rect.y)/rect.h,0,1);
+  if(s.dragging.type==='scale')scaleLabelCameraGuide(s.dragging.edge,(s.dragging.edge==='left'||s.dragging.edge==='right')?nx:ny);
+  else setLabelCameraPoint(s.dragging.ref,nx,ny);
+  drawLabelCameraOverlay();ev.preventDefault();
+}
 function labelCameraPointerEnd(ev){const s=labelCameraGuideState,canvas=$('labelCameraOverlay');if(!s||!canvas)return;if(s.dragging?.pointerId===ev.pointerId)s.dragging=null;try{canvas.releasePointerCapture(ev.pointerId);}catch{}}
 async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
@@ -2211,4 +2251,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.8', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.9', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

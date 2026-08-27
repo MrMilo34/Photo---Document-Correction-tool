@@ -1,16 +1,13 @@
-# MeshDoctor v1.6.8
+# MeshDoctor v1.6.9
 
-- Fixed the lower-left pink panoramic guide point so the cyan guide line now reaches and closes through that point correctly.
-- Keeps movable mirrored outside pink edges for narrow bottle-label captures.
-- Keeps the camera-performance improvements and cropped narrow capture output from v1.6.7.
+## Label Maker camera update
 
-# MeshDoctor v1.6.7
+- Added dedicated **neon pink › resize handles** around the live camera mesh.
+- Left/right handles resize the capture width; top/bottom handles resize the height.
+- The existing mesh dots now **reshape the contour only** instead of scaling every point together.
+- With **Mirror Points** enabled, horizontal resizing stays centered and scales both sides together.
+- With **Mirror Points** disabled, the left and right edges can be resized independently.
+- Keeps the panoramic ghost-overlap, auto-capture, narrow-photo crop, low-lag sampling, and the lower-left line fix from the recent Label Maker builds.
+- Sequential saved label names remain enabled: `MeshDoctor-label 01`, `MeshDoctor-label 02`, etc.
 
-- Fixed the lower-left / outside panoramic guide handle interaction.
-- The mirrored outside pink edge can now be dragged inward; its opposite edge mirrors automatically, so the capture window can be made very narrow for cylindrical labels.
-- The inner points rescale with the edge so the guide does not fold or cross when narrowed.
-- Camera overlap analysis now samples a tiny crop about seven times per second instead of copying and analyzing the full camera frame every animation frame, reducing live camera delay.
-- Camera captures are cropped to the selected narrow guide area with a small safety margin before being added to Label Maker.
-- Auto Capture still compares the previous right-edge strip with the current left-edge strip.
-
-PWA cache key: `meshdoctor-v1.6.7`.
+PWA cache key: `meshdoctor-v1.6.9`.
