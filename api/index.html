@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#090c12" />
+  <title>MeshDoctor</title>
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.9" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.9" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.9" />
+  <link rel="stylesheet" href="styles.css?v=1.6.9" />
+</head>
+<body class="ambient-mode home-mode">
+  <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
+    <div class="home-camera-bg">
+      <video id="homeBgVideo" playsinline muted autoplay></video>
+      <div class="home-camera-vignette"></div>
+    </div>
+    <canvas id="homeMeshCanvas" class="home-mesh-canvas"></canvas>
+    <div class="home-mesh-glow"></div>
+    <div id="homeShardField" class="home-shard-field"></div>
+  </div>
+
+  <header class="topbar">
+    <button id="headerBackBtn" class="header-back neon-icon-btn" aria-label="Back to editing"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="export-heading">
+      <div class="brand">MeshDoctor</div>
+      <div class="sub">Polish &amp; export</div>
+    </div>
+    <button id="resultHomeBtn" class="icon-btn neon-icon-btn" aria-label="Home">🏠</button>
+  </header>
+
+  <main>
+    <section id="homeView" class="view active home-view">
+      <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
+      <div class="hero-card splash-card">
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.9" alt="MeshDoctor splash screen" />
+      </div>
+      <div class="version-tag">release v1.6.9</div>
+
+      <div class="home-actions">
+        <label class="primary big-btn neon-action">📷 Take Photo
+          <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+        </label>
+        <label class="secondary big-btn neon-action">🖼 Choose Photo
+          <input id="galleryInput" type="file" accept="image/*" hidden />
+        </label>
+        <button id="pdfBuilderBtn" class="secondary big-btn neon-action pdf-home-btn">📄 Create a PDF</button>
+        <button id="labelMakerBtn" class="secondary big-btn neon-action label-home-btn">🏷️ Label Maker</button>
+      </div>
+    </section>
+
+    <section id="labelView" class="view label-view">
+      <div class="pdf-shell glass-panel label-shell">
+        <div class="pdf-head">
+          <button id="labelBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="pdf-title">
+            <strong>Label Maker</strong>
+            <span>Add, order, select label areas, then stitch &amp; polish</span>
+          </div>
+          <button id="labelAddBtn" class="neon-icon-btn pdf-add" aria-label="Add label images">＋</button>
+        </div>
+        <div id="labelImageList" class="pdf-image-list label-image-list"></div>
+        <div id="labelEmpty" class="pdf-empty">
+          <div class="pdf-empty-icon">🏷️</div>
+          <strong>Add label images to begin</strong>
+          <span>Photograph around a package or select existing photos. Keep some overlap between neighbouring images.</span>
+          <button id="labelEmptyAddBtn" class="secondary neon-action">Add Images</button>
+        </div>
+      </div>
+      <button id="labelContinueBtn" class="bottom-action pdf-save mesh-correct" disabled><span>CONTINUE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
+      <input id="labelPhotoInput" type="file" accept="image/*" multiple hidden />
+      <input id="labelReplaceInput" type="file" accept="image/*" hidden />
+    </section>
+
+    <section id="labelAreaView" class="view label-area-view">
+      <div class="label-area-head glass-panel">
+        <button id="labelAreaBackBtn" class="neon-icon-btn" aria-label="Back to label images"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pdf-title"><strong id="labelAreaTitle">Select Label Area</strong><span id="labelAreaCounter">Image 1 of 1</span></div>
+        <button id="labelAreaAutoBtn" class="neon-icon-btn" aria-label="Reset label area">◇</button>
+      </div>
+      <div id="labelAreaStage" class="label-area-stage">
+        <canvas id="labelAreaCanvas"></canvas>
+        <div id="labelAreaZoomChip" class="zoom-chip hidden">1.0×</div>
+      </div>
+      <div class="label-map-rotation glass-panel">
+        <div class="label-rotation-head"><span>Straighten</span><output id="labelAreaRotationValue">0.0°</output><button id="labelAreaRotationResetBtn" type="button">Reset</button></div>
+        <input id="labelAreaRotationSlider" type="range" min="-10" max="10" step="0.1" value="0" aria-label="Straighten this source label image" />
+      </div>
+      <div class="label-area-help glass-panel">Start with 4 corner points, then tap the blue edge to add extra mesh points where the label curves. Pinch to zoom, drag empty space to pan, use the center 4-way control to move the whole mesh, and use Straighten for small rotation corrections before stitching.</div>
+      <div class="label-area-tools">
+        <div class="label-area-edit-actions">
+          <button id="labelAreaUndoBtn" class="themed-secondary">↶ Undo</button>
+          <button id="labelAreaRemovePointBtn" class="themed-secondary">Remove Point</button>
+        </div>
+        <button id="labelApplyRemainingBtn" class="themed-secondary">Apply Area to Remaining</button>
+        <div class="label-area-nav">
+          <button id="labelPrevBtn" class="themed-secondary">← Previous</button>
+          <button id="labelNextBtn" class="primary">Next →</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="labelResultView" class="view label-result-view">
+      <div class="label-result-head glass-panel">
+        <button id="labelResultBackBtn" class="neon-icon-btn" aria-label="Back to label area"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pdf-title"><strong>Label Result</strong><span>Stitched &amp; locally polished</span></div>
+        <button id="labelAiPolishBtn" class="neon-icon-btn" aria-label="AI polish">✦</button>
+      </div>
+      <div class="label-result-stage"><canvas id="labelResultCanvas"></canvas></div>
+      <div id="labelResultStatus" class="ai-engine-status ready"><i></i><span>Label stitched and polished. Tap ✦ for an optional AI document polish.</span></div>
+      <div class="label-result-actions">
+        <button id="labelRebuildBtn" class="themed-secondary">↶ Rebuild</button>
+        <button id="labelSaveBtn" class="primary">Save PNG</button>
+      </div>
+    </section>
+
+    <section id="pdfView" class="view pdf-view">
+      <div class="pdf-shell glass-panel">
+        <div class="pdf-head">
+          <button id="pdfBackBtn" class="neon-icon-btn" aria-label="Back to home"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="pdf-title">
+            <strong>Create a PDF</strong>
+            <span>Add images or selected pages from a PDF, then drag to reorder</span>
+          </div>
+          <button id="pdfAddBtn" class="neon-icon-btn pdf-add" aria-label="Add images or PDF pages">＋</button>
+          <input id="pdfImageInput" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
+        </div>
+        <div id="pdfImageList" class="pdf-image-list"></div>
+        <div id="pdfEmpty" class="pdf-empty">
+          <div class="pdf-empty-icon">＋</div>
+          <strong>Add pages to begin</strong>
+          <span>Add images or import an existing PDF and choose only the pages you want.</span>
+          <button id="pdfEmptyAddBtn" class="secondary neon-action">Add Images / PDF</button>
+        </div>
+      </div>
+      <button id="savePdfBtn" class="bottom-action pdf-save mesh-correct"><span>SAVE PDF</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
+    </section>
+
+    <section id="shapeView" class="view">
+      <button id="shapeBackBtn" class="shape-back neon-icon-btn shape-ui" aria-label="Back"><svg class="back-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div id="stageWrap" class="stage-wrap">
+        <div id="canvasPan" class="canvas-pan"><div id="canvasZoom" class="canvas-zoom"><canvas id="editCanvas"></canvas></div></div>
+        <div id="loupe" class="loupe hidden"><canvas id="loupeCanvas" width="160" height="160"></canvas><div class="loupe-cross"></div></div>
+        <div id="pointActions" class="point-actions hidden" aria-label="Selected point actions">
+          <button id="movePointBtn" class="point-action move" aria-label="Move selected point"><svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Move</span></button>
+          <button id="removePointBtn" class="point-action remove" aria-label="Remove selected point">✕ <span>Remove</span></button>
+        </div>
+        <button id="meshMoveAllBtn" class="mesh-move-all hidden" type="button" aria-label="Move whole mesh"><svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div id="zoomChip" class="zoom-chip hidden">1.0×</div>
+      </div>
+      <div class="hint shape-ui">Pinch to zoom. Drag empty space to move around. Adjust the final perimeter mesh so the stitched label is framed exactly how you want it.</div>
+      <div class="toolbar shape-ui">
+        <button id="autoBtn" class="mesh-tool">✨ <span>Auto</span></button>
+        <button id="undoPointBtn" class="mesh-tool">↶ <span>Undo</span></button>
+        <button id="resetBtn" class="mesh-tool">◇ <span>4 Points</span></button>
+        <button id="rotateBtn" class="mesh-tool">↻ <span>Rotate</span></button>
+      </div>
+      <button id="correctBtn" class="bottom-action shape-ui mesh-correct"><span>CORRECT IMAGE</span><i class="correct-mesh" aria-hidden="true"></i><i class="correct-nodes" aria-hidden="true"></i></button>
+    </section>
+
+    <section id="resultView" class="view result-view">
+      <div class="result-stage"><canvas id="resultCanvas"></canvas></div>
+
+      <div class="mode-row">
+        <button id="adjustModeBtn" class="seg">Adjust</button>
+        <button id="bwModeBtn" class="seg">Grayscale</button>
+        <button id="correctedModeBtn" class="seg active">Corrected</button>
+        <button id="aiAssistModeBtn" class="seg ai-seg">✦ AI Assisted</button>
+      </div>
+
+      <section id="adjustPanel" class="adjust-panel hidden" aria-label="Image adjustments">
+        <div class="adjust-head">
+          <div>
+            <strong>Image Adjustments</strong>
+            <span>Drag the pink control to adjust.</span>
+          </div>
+          <button id="resetAdjustBtn" class="reset-adjust">Reset</button>
+        </div>
+
+        <div class="slider-row">
+          <span>Brightness <output id="brightnessValue">0</output></span>
+          <div id="brightnessSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Brightness" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="brightness" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
+        </div>
+        <div class="slider-row">
+          <span>Contrast <output id="contrastValue">0</output></span>
+          <div id="contrastSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Contrast" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="contrast" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
+        </div>
+        <div class="slider-row">
+          <span>Saturation <output id="saturationValue">0</output></span>
+          <div id="saturationSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Saturation" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="saturation" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
+        </div>
+        <div class="slider-row">
+          <span>Black level <output id="blackValue">0</output></span>
+          <div id="blackSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="Black level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="black" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
+        </div>
+        <div class="slider-row">
+          <span>White level <output id="whiteValue">0</output></span>
+          <div id="whiteSlider" class="mesh-slider" role="slider" tabindex="0" aria-label="White level" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" data-adjust="white" data-value="0"><div class="mesh-slider-track"><div class="mesh-slider-fill"></div></div><div class="mesh-slider-trail" aria-hidden="true"></div><div class="mesh-slider-thumb" aria-hidden="true"></div></div>
+        </div>
+      </section>
+
+      <section id="aiAssistPanel" class="assist-panel hidden">
+        <div class="assist-head">
+          <div class="assist-badge">✦</div>
+          <div><strong>AI Assisted</strong><span>AI restoration when available, with a strong local fallback.</span></div>
+        </div>
+        <div class="ai-choice-row">
+          <button class="ai-choice" data-ai-choice="automatic">Automatic</button>
+          <button class="ai-choice" data-ai-choice="document">Document</button>
+          <button class="ai-choice" data-ai-choice="photo">Photo</button>
+        </div>
+        <div id="aiEngineStatus" class="ai-engine-status"><i></i><span>Checking AI image engine…</span></div>
+        <div class="ai-reference-panel">
+          <div class="ai-reference-copy">
+            <strong>Optional reference photo</strong>
+            <span>Add another angle of the same photo or document to help AI recover glare-covered or blocked details.</span>
+          </div>
+          <div class="ai-reference-actions">
+            <label class="ai-reference-btn">＋ Add additional Reference Image
+              <input id="aiReferenceInput" type="file" accept="image/*" hidden />
+            </label>
+            <button id="aiReferenceClearBtn" class="secondary ai-reference-clear hidden" type="button">Remove</button>
+          </div>
+          <div id="aiReferenceMeta" class="ai-reference-meta">No reference added.</div>
+        </div>
+        <div id="aiChoiceStatus" class="ai-choice-status">Automatic, Document, or Photo.</div>
+      </section>
+
+      <label class="image-name-box" for="imageOutputName">
+        <span>Image name</span>
+        <input id="imageOutputName" type="text" maxlength="80" placeholder="image" />
+      </label>
+
+      <div class="result-actions">
+        <button id="shareBtn" class="themed-secondary">↗ Share</button>
+        <button id="savePngBtn" class="primary">Save PNG</button>
+      </div>
+      <p class="safe-note">AI Assisted uses secure AI image restoration when available, with local restoration as a fallback.</p>
+    </section>
+  </main>
+
+
+  <dialog id="settingsDialog" class="settings-dialog">
+    <div class="settings-head">
+      <div>
+        <h2>Settings</h2>
+        <p>AI connection status and file output preferences.</p>
+      </div>
+      <button id="settingsCloseBtn" class="neon-icon-btn" type="button" aria-label="Close settings">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-card ai-settings-card">
+        <div class="ai-settings-head">
+          <div><strong>AI Service</strong><small>Blue = connected · Pink = needs attention</small></div>
+          <button id="testAiConnectionBtn" class="themed-secondary ai-test-btn" type="button">Test Connection</button>
+        </div>
+        <div class="ai-status-list">
+          <div class="ai-status-row"><span class="ai-status-label">MeshDoctor endpoint</span><span id="settingsAiEndpoint" class="ai-status-value unknown"><i></i><b>Not tested</b></span></div>
+          <div class="ai-status-row"><span class="ai-status-label">OpenAI service</span><span id="settingsAiOpenAI" class="ai-status-value unknown"><i></i><b>Not tested</b></span></div>
+          <div class="ai-status-row"><span class="ai-status-label">Model</span><span id="settingsAiModel" class="ai-status-text">gpt-image-2</span></div>
+          <div class="ai-status-row"><span class="ai-status-label">Last AI restore</span><span id="settingsAiLast" class="ai-status-value unknown"><i></i><b>No request yet</b></span></div>
+        </div>
+        <small id="settingsAiDetail" class="ai-detail">Test the connection to check Vercel, your API key, and GPT Image access without generating an image.</small>
+      </div>
+      <div class="settings-card">
+        <strong>File Output</strong>
+        <label class="settings-label">Default PDF file name
+          <input id="settingsPdfName" type="text" maxlength="64" placeholder="MeshDoctor-created" />
+        </label>
+        <div class="settings-folder-row">
+          <span>Output folder</span>
+          <button id="chooseOutputFolderBtn" class="themed-secondary folder-select-btn" type="button">📁 Select Folder</button>
+          <small id="outputFolderStatus" class="output-folder-status">Downloads (default)</small>
+        </div>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button id="settingsCancelBtn" class="themed-secondary" type="button">Cancel</button>
+      <button id="settingsSaveBtn" class="primary" type="button">Save Settings</button>
+    </div>
+  </dialog>
+
+  <dialog id="aboutDialog">
+    <h2>MeshDoctor v1.6.9</h2>
+    <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
+    <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
+    <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
+    <p><strong>v1.6.9:</strong> separates Label Maker camera resizing from mesh shaping. Neon pink › scale handles now resize the capture area, while the existing mesh points only reshape the contour. Mirror Points still mirrors the opposite side while scaling.</p>
+    <button id="closeAboutBtn" class="primary">Got it</button>
+  </dialog>
+
+  <dialog id="pdfImportDialog" class="pdf-import-dialog">
+    <div class="pdf-import-head">
+      <div>
+        <h2>Choose PDF Pages</h2>
+        <p id="pdfImportName">Select the pages you want to add.</p>
+      </div>
+      <button id="pdfImportClose" class="neon-icon-btn" type="button" aria-label="Cancel PDF import">✕</button>
+    </div>
+    <div class="pdf-import-tools">
+      <button id="pdfSelectAll" class="secondary" type="button">Select All</button>
+      <button id="pdfSelectNone" class="secondary" type="button">Select None</button>
+      <span id="pdfImportCount">0 selected</span>
+    </div>
+    <div id="pdfImportStatus" class="pdf-import-status">Loading pages…</div>
+    <div id="pdfImportPages" class="pdf-import-pages"></div>
+    <div class="pdf-import-actions">
+      <button id="pdfImportCancel" class="themed-secondary" type="button">Cancel</button>
+      <button id="pdfImportAdd" class="primary" type="button">Add Selected Pages</button>
+    </div>
+  </dialog>
+
+  <dialog id="labelAddDialog" class="source-choice-dialog">
+    <div class="source-choice-head"><strong>Add Images</strong><button id="labelAddCloseBtn" class="neon-icon-btn" type="button" aria-label="Close">✕</button></div>
+    <p>Choose how you want to add label images.</p>
+    <button id="labelCameraChoiceBtn" class="primary source-choice-btn" type="button">📷 Camera</button>
+    <button id="labelPhotosChoiceBtn" class="themed-secondary source-choice-btn" type="button">🖼️ Photos</button>
+  </dialog>
+
+  <dialog id="labelCameraDialog" class="label-camera-dialog">
+    <div class="label-camera-view">
+      <video id="labelCameraVideo" autoplay playsinline muted></video>
+      <canvas id="labelCameraOverlay" class="label-camera-overlay" aria-label="Live panoramic label guide"></canvas>
+      <div class="label-camera-guide" aria-hidden="true"></div>
+      <div class="label-camera-toolbar">
+        <label class="label-camera-chip"><input id="labelCameraMirrorToggle" type="checkbox" checked /> Mirror Points</label>
+        <label class="label-camera-chip"><input id="labelCameraAutoToggle" type="checkbox" checked /> Auto Capture</label>
+        <button id="labelCameraResetGuideBtn" class="label-camera-chip action" type="button">Reset Guide</button>
+      </div>
+      <div id="labelCameraFirstShot" class="label-camera-first-shot">Manual capture for the first shot.</div>
+      <div class="label-camera-instruction">
+        <strong>Panoramic photo mode</strong>
+        <span id="labelCameraInstructionText">Line the label up inside the curved guide, take the first photo, then rotate the bottle slowly.</span>
+      </div>
+    </div>
+    <div class="label-camera-controls">
+      <button id="labelCameraCancelBtn" class="themed-secondary" type="button">Cancel</button>
+      <button id="labelCameraCaptureBtn" class="camera-shutter" type="button" aria-label="Capture photo"><span></span></button>
+      <button id="labelCameraDoneBtn" class="primary" type="button">Done <b id="labelCameraCount">0</b></button>
+    </div>
+  </dialog>
+
+  <dialog id="fileNameDialog" class="file-name-dialog">
+    <div class="settings-head"><div><h2 id="fileNameTitle">Name your file</h2><p id="fileNameHelp">Choose the name used when this file is saved.</p></div><button id="fileNameCloseBtn" class="neon-icon-btn" type="button" aria-label="Close">✕</button></div>
+    <div class="file-name-body"><label class="settings-label">File name<input id="fileNameInput" type="text" maxlength="96" placeholder="MeshDoctor-file" /></label><div id="fileNameExtension" class="file-name-extension">.png</div></div>
+    <div class="settings-actions"><button id="fileNameCancelBtn" class="themed-secondary" type="button">Cancel</button><button id="fileNameSaveBtn" class="primary" type="button">Save</button></div>
+  </dialog>
+
+  <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="config.js?v=1.6.9"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
+  <script src="app.js?v=1.6.9"></script>
+</body>
+</html>
