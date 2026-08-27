@@ -1687,15 +1687,16 @@ function scaleLabelCameraGuide(edge,value){
     }else if(edge==='left') nextL=clamp(value,.01,b.right-minSpan);
     else nextR=clamp(value,b.left+minSpan,.99);
     const oldSpan=Math.max(minSpan,b.right-b.left),nextSpan=Math.max(minSpan,nextR-nextL);
-    rows.forEach(name=>s.points[name].forEach(p=>{const u=(p.x-b.left)/oldSpan;p.x=nextL+u*nextSpan;}));
+    rows.forEach(name=>s.points[name].forEach(pt=>{const u=(pt.x-b.left)/oldSpan;pt.x=nextL+u*nextSpan;}));
     if(s.mirror)syncLabelCameraMirror();
     return;
   }
-  let nextT=b.top,nextB=b.bottom;
-  if(edge==='top')nextT=clamp(value,.01,b.bottom-minSpan);
-  else nextB=clamp(value,b.top+minSpan,.99);
+  const center=(b.top+b.bottom)/2;
+  const rawHalf=edge==='top'?center-clamp(value,.01,center-minSpan/2):clamp(value,center+minSpan/2,.99)-center;
+  const half=clamp(rawHalf,minSpan/2,.49);
+  const nextT=center-half,nextB=center+half;
   const oldSpan=Math.max(minSpan,b.bottom-b.top),nextSpan=Math.max(minSpan,nextB-nextT);
-  rows.forEach(name=>s.points[name].forEach(p=>{const u=(p.y-b.top)/oldSpan;p.y=nextT+u*nextSpan;}));
+  rows.forEach(name=>s.points[name].forEach(pt=>{const u=(pt.y-b.top)/oldSpan;pt.y=nextT+u*nextSpan;}));
 }
 function setLabelCameraPoint(ref,nx,ny){
   const s=labelCameraGuideState;if(!s)return;
@@ -1715,12 +1716,12 @@ function getLabelCameraScaleHandles(canvas){
   const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
   const dpr=Math.max(1,window.devicePixelRatio||1),cx=(left+right)/2,cy=(top+bottom)/2;
   const sideOffset=Math.max(24*dpr,canvas.width*.018);
-  const verticalInset=Math.max(18*dpr,canvas.height*.028);
+  const verticalOffset=Math.max(24*dpr,canvas.height*.020);
   return [
     {edge:'left',x:left-sideOffset,y:cy,angle:0},
     {edge:'right',x:right+sideOffset,y:cy,angle:Math.PI},
-    {edge:'top',x:cx,y:Math.min(bottom-verticalInset,top+verticalInset),angle:Math.PI/2},
-    {edge:'bottom',x:cx,y:Math.max(top+verticalInset,bottom-verticalInset),angle:-Math.PI/2}
+    {edge:'top',x:cx,y:top-verticalOffset,angle:Math.PI/2},
+    {edge:'bottom',x:cx,y:bottom+verticalOffset,angle:-Math.PI/2}
   ];
 }
 function labelCameraNearestScaleHandle(x,y){
@@ -1742,7 +1743,7 @@ function updateLabelCameraUi(){
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Use the neon pink › handles to resize the capture area in width and height. Drag the mesh dots only to shape the label contour, then take the first photo.';
+    help.textContent='Use the neon pink › handles to resize the capture area in width and height. Drag the mesh dots to shape the contour itself, then take the first photo.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
@@ -1757,7 +1758,7 @@ function drawLabelCameraOverlay(){
   if(s.prevStrip){ const ghostW=rect.w*.18,ghostH=rect.h*.70,gx=rect.x+8,gy=rect.y+(rect.h-ghostH)/2; ctx.save(); ctx.globalAlpha=.42; ctx.drawImage(s.prevStrip.preview,gx,gy,ghostW,ghostH); ctx.restore(); ctx.save(); ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.setLineDash([10,8]); ctx.strokeRect(gx,gy,ghostW,ghostH); ctx.restore(); }
   const topPts=s.points.top.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
   const botPts=s.points.bottom.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
-  ctx.save(); ctx.fillStyle='rgba(53,207,255,.05)'; ctx.strokeStyle='rgba(83,225,255,.95)'; ctx.lineWidth=Math.max(2,canvas.width*.0018); ctx.shadowColor='rgba(53,207,255,.45)'; ctx.shadowBlur=16; ctx.beginPath(); smoothPath(ctx,topPts); for(let i=botPts.length-1;i>=0;i--){const p=botPts[i]; if(i===botPts.length-1) ctx.lineTo(p.x,p.y); else {const prev=botPts[i+1],mx=(prev.x+p.x)/2,my=(prev.y+p.y)/2; ctx.quadraticCurveTo(prev.x,prev.y,mx,my);} } if(botPts.length) ctx.lineTo(botPts[0].x,botPts[0].y); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.fillStyle='rgba(53,207,255,.05)'; ctx.strokeStyle='rgba(83,225,255,.95)'; ctx.lineWidth=Math.max(2,canvas.width*.0018); ctx.shadowColor='rgba(53,207,255,.45)'; ctx.shadowBlur=10; ctx.beginPath(); smoothPath(ctx,topPts); for(let i=botPts.length-1;i>=0;i--){const p=botPts[i]; if(i===botPts.length-1) ctx.lineTo(p.x,p.y); else {const prev=botPts[i+1],mx=(prev.x+p.x)/2,my=(prev.y+p.y)/2; ctx.quadraticCurveTo(prev.x,prev.y,mx,my);} } if(botPts.length) ctx.lineTo(botPts[0].x,botPts[0].y); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
   ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=rect.x+rect.w*.5; ctx.beginPath(); ctx.moveTo(cx,rect.y+rect.h*.08); ctx.lineTo(cx,rect.y+rect.h*.92); ctx.stroke(); ctx.restore();
   // Dedicated scale handles. The mesh dots are now free to reshape the contour without resizing the whole guide.
   for(const h of getLabelCameraScaleHandles(canvas)){
@@ -1796,7 +1797,7 @@ function sampleLabelCameraStrip(side='left'){
   const b=labelCameraGuideBoundsNormalized(),w=b.right-b.left,h=b.bottom-b.top;
   const stripW=Math.max(.02,w*.18),left=side==='left'?b.left:b.right-stripW;
   const crop=labelCameraDisplayRectToVideoSource(left,b.top+h*.10,left+stripW,b.bottom-h*.10); if(!crop)return null;
-  let c=s.sampleCanvas; if(!c){c=document.createElement('canvas');c.width=36;c.height=84;s.sampleCanvas=c;}
+  let c=s.sampleCanvas; if(!c){c=document.createElement('canvas');c.width=28;c.height=64;s.sampleCanvas=c;}
   const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
   const d=ctx.getImageData(0,0,c.width,c.height).data,out=new Uint8Array(c.width*c.height);
   for(let i=0,j=0;i<d.length;i+=4,j++)out[j]=Math.round(.2126*d[i]+.7152*d[i+1]+.0722*d[i+2]);
@@ -1806,10 +1807,10 @@ function sampleLabelCameraStrip(side='left'){
 function compareLumaSamples(a,b){if(!a||!b||a.w!==b.w||a.h!==b.h)return 0;let diff=0;for(let i=0;i<a.data.length;i++)diff+=Math.abs(a.data[i]-b.data[i]);return clamp(1-(diff/(a.data.length*255)),0,1);}
 function tickLabelCamera(now=performance.now()){
   drawLabelCameraOverlay(); const st=labelCameraGuideState;
-  if(st?.prevStrip&&now-st.lastSampleAt>=140){
+  if(st?.prevStrip&&now-st.lastSampleAt>=190){
     st.lastSampleAt=now;
     const current=sampleLabelCameraStrip('left');st.currentStrip=current;st.alignScore=compareLumaSamples(current,st.prevStrip);
-    if(st.auto&&now-st.lastCaptureAt>950&&st.alignScore>.81){st.matchFrames++;if(st.matchFrames>=4&&!labelCameraWorking)captureLabelCamera(true);}else st.matchFrames=0;
+    if(st.auto&&now-st.lastCaptureAt>1100&&st.alignScore>.81){st.matchFrames++;if(st.matchFrames>=4&&!labelCameraWorking)captureLabelCamera(true);}else st.matchFrames=0;
     updateLabelCameraUi();
   }
   labelCameraRaf=requestAnimationFrame(tickLabelCamera);
@@ -1822,8 +1823,8 @@ function labelCameraEventPos(ev){
 function labelCameraNearestRef(x,y){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay();if(!s||!canvas)return null;const rect=getLabelCameraGuideRect(canvas);let best=null,bd=Infinity;for(const ref of getLabelCameraEditableRefs()){const p=labelCameraPointToPixel(ref,rect),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=ref;}}return bd<=42*(window.devicePixelRatio||1)?best:null;}
 function labelCameraPointerDown(ev){
   const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;try{canvas.setPointerCapture(ev.pointerId);}catch{}
-  const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y);if(scaleHandle){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();return;}
-  const ref=labelCameraNearestRef(pos.x,pos.y);if(ref){s.dragging={pointerId:ev.pointerId,type:'point',ref};ev.preventDefault();}
+  const ref=labelCameraNearestRef(pos.x,pos.y);if(ref){s.dragging={pointerId:ev.pointerId,type:'point',ref};ev.preventDefault();return;}
+  const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y);if(scaleHandle){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();}
 }
 function labelCameraPointerMove(ev){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos||!s.dragging||s.dragging.pointerId!==ev.pointerId)return;
@@ -1837,7 +1838,7 @@ async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
   if(!navigator.mediaDevices?.getUserMedia){ const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.capture='environment'; input.onchange=()=>addLabelFiles(input.files||[]); input.click(); return; }
   try{
-    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30}},audio:false});
+    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},aspectRatio:{ideal:16/9},frameRate:{ideal:24,max:24}},audio:false});
     const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
@@ -1845,7 +1846,7 @@ function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCamera
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return; labelCameraWorking=true;
   try{
-    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const crop=labelCameraSourceCrop(.06,.035)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}; const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(crop.sw*scale)); c.height=Math.max(1,Math.round(crop.sh*scale)); c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.94); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); addLabelFiles([file]); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
+    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const crop=labelCameraSourceCrop(.06,.035)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}; const maxEdge=1600,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(crop.sw*scale)); c.height=Math.max(1,Math.round(crop.sh*scale)); c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.94); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); addLabelFiles([file]); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
     if(labelCameraGuideState){ const strip=sampleLabelCameraStrip('right'); if(strip){ labelCameraGuideState.prevStrip=strip; labelCameraGuideState.alignScore=0; labelCameraGuideState.matchFrames=0; labelCameraGuideState.lastCaptureAt=performance.now(); } updateLabelCameraUi(); drawLabelCameraOverlay(); }
     toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} added.`);
   }finally{ labelCameraWorking=false; }
@@ -2253,4 +2254,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.10', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.11', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
