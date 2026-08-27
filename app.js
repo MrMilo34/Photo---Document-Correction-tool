@@ -1713,18 +1713,20 @@ function setLabelCameraPoint(ref,nx,ny){
 function getLabelCameraScaleHandles(canvas){
   const rect=getLabelCameraGuideRect(canvas),b=labelCameraGuideLocalBounds();
   const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
-  const dpr=Math.max(1,window.devicePixelRatio||1),cx=(left+right)/2,cy=(top+bottom)/2,offset=Math.max(24*dpr,canvas.width*.018);
+  const dpr=Math.max(1,window.devicePixelRatio||1),cx=(left+right)/2,cy=(top+bottom)/2;
+  const sideOffset=Math.max(24*dpr,canvas.width*.018);
+  const verticalInset=Math.max(18*dpr,canvas.height*.028);
   return [
-    {edge:'left',x:left-offset,y:cy,angle:0},
-    {edge:'right',x:right+offset,y:cy,angle:Math.PI},
-    {edge:'top',x:cx,y:top-offset,angle:Math.PI/2},
-    {edge:'bottom',x:cx,y:bottom+offset,angle:-Math.PI/2}
+    {edge:'left',x:left-sideOffset,y:cy,angle:0},
+    {edge:'right',x:right+sideOffset,y:cy,angle:Math.PI},
+    {edge:'top',x:cx,y:Math.min(bottom-verticalInset,top+verticalInset),angle:Math.PI/2},
+    {edge:'bottom',x:cx,y:Math.max(top+verticalInset,bottom-verticalInset),angle:-Math.PI/2}
   ];
 }
 function labelCameraNearestScaleHandle(x,y){
   const canvas=resizeLabelCameraOverlay();if(!canvas)return null;
   let best=null,bd=Infinity;for(const h of getLabelCameraScaleHandles(canvas)){const d=Math.hypot(h.x-x,h.y-y);if(d<bd){bd=d;best=h;}}
-  return bd<=30*(window.devicePixelRatio||1)?best:null;
+  return bd<=34*(window.devicePixelRatio||1)?best:null;
 }
 function resizeLabelCameraOverlay(){
   const canvas=$('labelCameraOverlay'); if(!canvas)return null;
@@ -1740,7 +1742,7 @@ function updateLabelCameraUi(){
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Use the neon pink › handles to resize the capture area. Drag the mesh dots only to shape the label contour, then take the first photo.';
+    help.textContent='Use the neon pink › handles to resize the capture area in width and height. Drag the mesh dots only to shape the label contour, then take the first photo.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
@@ -2251,4 +2253,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.9', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.10', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

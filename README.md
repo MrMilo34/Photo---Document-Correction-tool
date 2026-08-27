@@ -1,13 +1,10 @@
-# MeshDoctor v1.6.9
+# MeshDoctor v1.6.10
 
-## Label Maker camera update
+## What’s new in v1.6.10
 
-- Added dedicated **neon pink › resize handles** around the live camera mesh.
-- Left/right handles resize the capture width; top/bottom handles resize the height.
-- The existing mesh dots now **reshape the contour only** instead of scaling every point together.
-- With **Mirror Points** enabled, horizontal resizing stays centered and scales both sides together.
-- With **Mirror Points** disabled, the left and right edges can be resized independently.
-- Keeps the panoramic ghost-overlap, auto-capture, narrow-photo crop, low-lag sampling, and the lower-left line fix from the recent Label Maker builds.
-- Sequential saved label names remain enabled: `MeshDoctor-label 01`, `MeshDoctor-label 02`, etc.
+- Added dedicated **height resizing controls** to the Label Maker camera guide so the **top** and **bottom** neon pink `›` handles are both clearly visible and usable.
+- The **top handle now behaves the same way as the side handles**: drag it to resize that edge of the capture zone.
+- The **bottom handle** now controls the bottom edge height directly.
+- Width handles, mesh contour points, mirror behavior, auto-capture, and sequential label naming are all preserved.
 
-PWA cache key: `meshdoctor-v1.6.9`.
+PWA cache key: `meshdoctor-v1.6.10`.
