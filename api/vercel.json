@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/ai-correct.js": {
-      "maxDuration": 120
-    }
-  }
-}
