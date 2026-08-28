@@ -301,3 +301,15 @@ body.pdf-mode .pdf-save{display:block}
 /* MeshDoctor v1.6.9: pink chevron resize handles are drawn on the camera overlay canvas; mesh dots are contour-only. */
 
 #labelRestoreBtn{margin-top:10px;}
+
+
+/* Label camera live stitch preview v1.6.16 */
+.label-camera-live-panel{position:absolute;left:14px;right:14px;top:62px;padding:10px 12px;border-radius:16px;background:rgba(0,0,0,.50);border:1px solid rgba(87,217,255,.18);color:#eff7ff;z-index:4;backdrop-filter:blur(10px)}
+.label-camera-live-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.label-camera-live-head strong{font-size:11px;letter-spacing:.01em}
+.label-camera-live-head span{font-size:10px;color:#c8d9e7}
+#labelCameraPreviewCanvas{display:block;width:100%;height:62px;border-radius:12px;background:linear-gradient(180deg,rgba(8,16,26,.94),rgba(5,12,20,.96));border:1px solid rgba(87,217,255,.14);box-shadow:inset 0 0 24px rgba(53,207,255,.05)}
+.label-camera-instruction{bottom:18px}
+.label-camera-first-shot{bottom:110px}
+@media(min-width:800px){.label-camera-live-panel{left:20px;right:20px}}
+@media(max-width:430px){.label-camera-live-panel{top:60px;padding:8px 10px}#labelCameraPreviewCanvas{height:56px}}

@@ -65,6 +65,8 @@ let labelCameraImageCapture=null;
 let fileNameResolve=null;
 let labelProjectSaveTimer=0;
 let labelProjectRestoreAvailable=false;
+const LABEL_CAMERA_PREVIEW_MAX_W = 1600;
+const LABEL_CAMERA_PREVIEW_H = 120;
 
 
 let points = [];
@@ -1738,6 +1740,9 @@ function defaultLabelCameraGuideState(){
     lastSampleAt:0,
     dragging:null,
     sampleCanvas:null,
+    previewPanorama:null,
+    previewFrameCount:0,
+    loopHint:false,
     instruction:'Line the label up inside the guide, take the first narrow photo, then rotate slowly for overlap.'
   };
 }
@@ -1807,19 +1812,100 @@ function resizeLabelCameraOverlay(){
   return canvas;
 }
 function smoothPath(ctx,pts){if(pts.length<2)return;ctx.moveTo(pts[0].x,pts[0].y);for(let i=0;i<pts.length-1;i++){const p=pts[i],n=pts[i+1],mx=(p.x+n.x)/2,my=(p.y+n.y)/2;ctx.quadraticCurveTo(p.x,p.y,mx,my);}const lp=pts[pts.length-1];ctx.lineTo(lp.x,lp.y);}
+function fitLabelCameraPreviewWidth(canvas,maxW=LABEL_CAMERA_PREVIEW_MAX_W){
+  if(!canvas||canvas.width<=maxW)return canvas;
+  const ratio=maxW/Math.max(1,canvas.width);
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,Math.round(canvas.width*ratio));
+  out.height=Math.max(1,Math.round(canvas.height*ratio));
+  out.getContext('2d').drawImage(canvas,0,0,out.width,out.height);
+  return out;
+}
+function makeLabelCameraPreviewPiece(src){
+  const scale=LABEL_CAMERA_PREVIEW_H/Math.max(1,src.height);
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,Math.round(src.width*scale));
+  out.height=LABEL_CAMERA_PREVIEW_H;
+  out.getContext('2d').drawImage(src,0,0,out.width,out.height);
+  return out;
+}
+function clearLabelCameraPreviewUi(){
+  const c=$('labelCameraPreviewCanvas');
+  const meta=$('labelCameraPreviewMeta');
+  if(meta) meta.textContent='0 sections captured';
+  if(!c) return;
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  const g=ctx.createLinearGradient(0,0,0,c.height);
+  g.addColorStop(0,'rgba(11,22,35,.98)');
+  g.addColorStop(1,'rgba(6,12,20,.98)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle='rgba(87,217,255,.18)';
+  ctx.lineWidth=2;
+  ctx.strokeRect(1,1,c.width-2,c.height-2);
+  ctx.setLineDash([10,8]);
+  ctx.strokeStyle='rgba(255,79,227,.22)';
+  ctx.beginPath(); ctx.moveTo(18,c.height/2); ctx.lineTo(c.width-18,c.height/2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(215,230,243,.86)';
+  ctx.font='600 24px system-ui, sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('Live stitched label will appear here',c.width/2,c.height/2-6);
+  ctx.font='400 18px system-ui, sans-serif';
+  ctx.fillStyle='rgba(159,176,191,.92)';
+  ctx.fillText('Capture the first section, then rotate the item slowly.',c.width/2,c.height/2+24);
+}
+function renderLabelCameraPreviewUi(){
+  const c=$('labelCameraPreviewCanvas');
+  const meta=$('labelCameraPreviewMeta');
+  const s=labelCameraGuideState;
+  if(meta) meta.textContent=`${s?.previewFrameCount||0} section${(s?.previewFrameCount||0)===1?'':'s'} captured`;
+  if(!c) return;
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  const g=ctx.createLinearGradient(0,0,0,c.height);
+  g.addColorStop(0,'rgba(11,22,35,.98)');
+  g.addColorStop(1,'rgba(6,12,20,.98)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,c.width,c.height);
+  if(!s?.previewPanorama){
+    clearLabelCameraPreviewUi();
+    return;
+  }
+  const pano=s.previewPanorama;
+  const pad=10,availW=c.width-pad*2,availH=c.height-pad*2,scale=Math.min(availW/Math.max(1,pano.width),availH/Math.max(1,pano.height));
+  const dw=Math.max(1,Math.round(pano.width*scale)),dh=Math.max(1,Math.round(pano.height*scale));
+  const dx=pad,dy=Math.round((c.height-dh)/2);
+  ctx.strokeStyle='rgba(87,217,255,.16)'; ctx.lineWidth=2; ctx.strokeRect(dx-1,dy-1,dw+2,dh+2);
+  ctx.drawImage(pano,dx,dy,dw,dh);
+  const progress=Math.min(1,Math.max(.06,dw/Math.max(1,availW)));
+  ctx.fillStyle='rgba(53,207,255,.18)'; ctx.fillRect(pad,c.height-7,availW,3);
+  ctx.fillStyle='rgba(53,207,255,.92)'; ctx.fillRect(pad,c.height-7,Math.max(24,availW*progress),3);
+}
+async function appendLabelCameraPreview(srcCanvas){
+  const s=labelCameraGuideState; if(!s||!srcCanvas)return;
+  const piece=makeLabelCameraPreviewPiece(srcCanvas);
+  if(!s.previewPanorama){
+    s.previewPanorama=piece;
+  }else{
+    s.previewPanorama=fitLabelCameraPreviewWidth(await stitchLabelPieces([s.previewPanorama,piece]));
+  }
+  s.previewFrameCount=(s.previewFrameCount||0)+1;
+  renderLabelCameraPreviewUi();
+}
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
   const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
+  renderLabelCameraPreviewUi();
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Use the left pink › handle for width and the top pink › handle for height, then take the first photo inside the guide. Photo mode will stitch the panorama for you automatically.';
+    help.textContent='Use the left pink › handle for width and the top pink › handle for height, take the first narrow photo, then rotate the item slowly. Camera mode stitches directly while Photos mode stays manual.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
-  if(s.matchFrames>10){help.textContent=`Overlap locked at ${pct}%. MeshDoctor is capturing the next section.`;return;}
-  if(s.alignScore>.79){help.textContent=`Good overlap · ${pct}% match. Hold steady or let Auto Capture take the shot.`;return;}
-  if(s.alignScore>.62){help.textContent=`Almost aligned · ${pct}% match. Rotate the bottle a little more.`;return;}
+  if(s.matchFrames>10){help.textContent=`Overlap locked at ${pct}%. MeshDoctor is extending the live stitched strip.`;return;}
+  if(s.alignScore>.79){help.textContent=`Good overlap · ${pct}% match. Hold steady or let Auto Capture add the next section.`;return;}
+  if(s.alignScore>.62){help.textContent=`Almost aligned · ${pct}% match. Rotate the item a little more.`;return;}
   help.textContent=`Rotate slowly and line the live label up with the ghosted previous section · ${pct}% match.`;
 }
 function drawLabelCameraOverlay(){
@@ -1996,10 +2082,10 @@ async function startLabelCamera(){
     if(track&&window.ImageCapture){
       try{ labelCameraImageCapture=new ImageCapture(track); }catch(err){ console.warn('ImageCapture unavailable',err); }
     }
-    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; labelCameraCaptures=[]; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
+    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; labelCameraCaptures=[]; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); clearLabelCameraPreviewUi(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
-function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; labelCameraImageCapture=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
+function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; labelCameraImageCapture=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); clearLabelCameraPreviewUi(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return; labelCameraWorking=true;
   try{
@@ -2007,6 +2093,7 @@ async function captureLabelCamera(fromAuto=false){
     if(!video?.videoWidth)return;
     const crop=labelCameraSourceCrop(.035,.03)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight};
     const c=await captureLabelCameraSourceCanvas(video,crop);
+    await appendLabelCameraPreview(c);
     const blob=await canvasBlob(c,'image/jpeg',.96);
     if(!blob)return;
     const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});
@@ -2024,7 +2111,7 @@ async function captureLabelCamera(fromAuto=false){
       updateLabelCameraUi();
       drawLabelCameraOverlay();
     }
-    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} captured in high quality.`);
+    toast(fromAuto?`Auto captured section ${labelCameraSessionCount}.`:`Section ${labelCameraSessionCount} captured in high quality.`);
   }finally{ labelCameraWorking=false; }
 }
 function defaultLabelMesh(){
@@ -2310,15 +2397,15 @@ async function finalizeLabelCameraSession(){
     if(views.label.classList.contains('active')) startHomeCameraBg();
     return;
   }
-  busy(true,'Stitching panoramic label…');
+  busy(true,'Finishing panoramic label…');
   try{
     const pieces=[];
     for(let i=0;i<labelCameraCaptures.length;i++){
-      $('busyText').textContent=`Preparing panoramic shot · ${i+1}/${labelCameraCaptures.length}`;
+      $('busyText').textContent=`Preparing captured section · ${i+1}/${labelCameraCaptures.length}`;
       pieces.push(await labelCameraFileToCanvas(labelCameraCaptures[i]));
       await new Promise(r=>setTimeout(r,0));
     }
-    $('busyText').textContent='Matching overlaps & stitching…';
+    $('busyText').textContent='Finishing the panoramic stitch…';
     const stitched=await stitchLabelPieces(pieces);
     const ctx=stitched.getContext('2d',{willReadFrequently:true});
     labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
@@ -2535,4 +2622,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.15', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.16', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
