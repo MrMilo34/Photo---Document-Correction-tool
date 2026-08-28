@@ -1938,15 +1938,9 @@ function advanceLabelCameraPreviewFromLive(){
 }
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
-  const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');if(first)first.classList.toggle('hidden',!!s.previewPanorama);if(!help)return;
-  help.classList.remove('match-good','match-almost','match-loop');
-  if(!s.previewPanorama){help.textContent='Set the capture box around one clear section, take the first photo, then rotate slowly. MeshDoctor will recognize matching detail and extend the live label automatically.';return;}
-  const pct=Math.round(s.alignScore*100);
-  if(s.loopHint){help.textContent='Starting area detected again · the label loop looks complete. Tap Done when ready.';help.classList.add('match-loop');return;}
-  if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent=`Tracking label · ${pct}% confidence. Saving a high-quality keyframe in the background.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.72){help.textContent=`Tracking well · ${pct}% confidence. Keep rotating slowly.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.60){help.textContent=`Almost aligned · ${pct}% confidence. Match the live label edge to the ghost and keep rotating slowly.`;help.classList.add('match-almost');return;}
-  help.textContent=`Looking for the label · ${pct}% confidence. Move back toward the ghosted edge and slow down.`;
+  const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');
+  if(first){first.classList.add('hidden');first.textContent='';}
+  if(help){help.textContent='';const wrap=help.closest?.('.label-camera-instruction');if(wrap)wrap.classList.add('hidden');}
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
@@ -1961,7 +1955,7 @@ function drawLabelCameraOverlay(){
   // exactly like a panorama camera guide. Reverse motion is mirrored automatically.
   if(ghost){
     const desiredGhostW=Math.max(24*(window.devicePixelRatio||1),(right-left)*LABEL_CAMERA_GHOST_RATIO);
-    const edgeGap=Math.max(1,canvas.width*.0015);
+    const edgeGap=0;
     const available=direction==='left'?(canvas.width-right-edgeGap):(left-edgeGap);
     const ghostW=Math.max(14,Math.min(desiredGhostW,Math.max(14,available)));
     const gx=direction==='left'?right+edgeGap:left-edgeGap-ghostW,gy=top,gh=bottom-top;
@@ -2694,4 +2688,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.20', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.21', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
