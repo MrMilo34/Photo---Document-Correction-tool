@@ -1,11 +1,11 @@
-# MeshDoctor v1.6.18
+# MeshDoctor v1.6.19
 
-## What’s new in v1.6.18
+## Camera latency pass
 
-- The user-defined camera box is now the **true visible capture area** and becomes locked after the first section is captured.
-- The previous captured edge is shown as a **clearer ghost reference pinned directly to the capture grid**, making text and line alignment easier.
-- High-resolution captures use **hidden left/right overscan margins** outside the visible box. Those margins are retained only to help registration, morphing, and seam blending.
-- Auto Capture now uses a **local best-overlap / peak detection rule** instead of waiting for a single unrealistic match percentage.
-- Final camera-mode stitching now applies a small **morph alignment plus wider feathered seam blend** before the final correction screen.
-- The live camera and live progress image stay lightweight; high-quality source captures continue to be saved separately for final output.
-- Manual Photos mode and Continue Last Project remain unchanged.
+- The live Label Maker camera remains a lightweight 480×270 feed, but the full-screen overlay is now rendered at display resolution instead of phone pixel density.
+- Expensive backdrop-blur effects over the moving video have been removed in camera mode.
+- Live motion/overlap sensing now reuses tiny analysis canvases instead of allocating new large canvases every scan.
+- The progress panorama paints new pixels into a fixed lightweight working canvas instead of rebuilding/copying the entire panorama on every addition.
+- High-quality still capture is limited to a medium-resolution still target (up to about 1600 px wide when supported), which is still far sharper than the live preview but avoids requesting the phone's full sensor image for every keyframe.
+- Auto-capture keyframes are spaced farther apart so the camera pipeline is not repeatedly interrupted while the item is rotating.
+- High-quality ghost replacement is deferred slightly so the live video gets priority immediately after a capture.
