@@ -60,6 +60,7 @@ let labelCameraSessionCount=0;
 let labelCameraGuideState=null;
 let labelCameraRaf=0;
 let labelCameraWorking=false;
+let labelCameraCaptures=[];
 let fileNameResolve=null;
 let labelProjectSaveTimer=0;
 let labelProjectRestoreAvailable=false;
@@ -1725,8 +1726,8 @@ function defaultLabelCameraGuideState(){
     mirror:true,
     auto:true,
     points:{
-      top:[{x:0,y:.18},{x:.24,y:.14},{x:.5,y:.12},{x:.76,y:.14},{x:1,y:.18}],
-      bottom:[{x:0,y:.82},{x:.24,y:.86},{x:.5,y:.88},{x:.76,y:.86},{x:1,y:.82}]
+      top:[{x:0,y:.18},{x:.25,y:.18},{x:.5,y:.18},{x:.75,y:.18},{x:1,y:.18}],
+      bottom:[{x:0,y:.82},{x:.25,y:.82},{x:.5,y:.82},{x:.75,y:.82},{x:1,y:.82}]
     },
     prevStrip:null,
     currentStrip:null,
@@ -1736,14 +1737,16 @@ function defaultLabelCameraGuideState(){
     lastSampleAt:0,
     dragging:null,
     sampleCanvas:null,
-    instruction:'Line the label up inside the curved guide. Match the ghosted strip from the previous photo, then rotate the bottle.'
+    instruction:'Line the label up inside the guide, take the first narrow photo, then rotate slowly for overlap.'
   };
 }
 function syncLabelCameraMirror(){
   const s=labelCameraGuideState;if(!s)return;
-  const t=s.points.top,b=s.points.bottom;
-  t[3]={x:1-t[1].x,y:t[1].y}; t[4]={x:1-t[0].x,y:t[0].y}; t[2].x=.5;
-  b[3]={x:1-b[1].x,y:b[1].y}; b[4]={x:1-b[0].x,y:b[0].y}; b[2].x=.5;
+  const b=labelCameraGuideLocalBounds();
+  const left=b.left,right=b.right,top=b.top,bottom=b.bottom;
+  const xs=[left,left+(right-left)*.25,.5,left+(right-left)*.75,right];
+  s.points.top=xs.map(x=>({x,y:top}));
+  s.points.bottom=xs.map(x=>({x,y:bottom}));
 }
 function getLabelCameraGuideRect(canvas){const w=canvas.width,h=canvas.height;return{x:w*.10,y:h*.11,w:w*.80,h:h*.74};}
 function getLabelCameraEditableRefs(){ return []; }
@@ -1778,19 +1781,7 @@ function scaleLabelCameraGuide(edge,value){
   const oldSpan=Math.max(minSpan,b.bottom-b.top),nextSpan=Math.max(minSpan,nextB-nextT);
   rows.forEach(name=>s.points[name].forEach(pt=>{const u=(pt.y-b.top)/oldSpan;pt.y=nextT+u*nextSpan;}));
 }
-function setLabelCameraPoint(ref,nx,ny){
-  const s=labelCameraGuideState;if(!s)return;
-  const row=s.points[ref.row];
-  nx=clamp(nx,.01,.99); ny=clamp(ny,.02,.98);
-  // The mesh dots now reshape only their local contour. Overall size is controlled by the pink chevron handles.
-  if(ref.i===0)nx=clamp(nx,.01,Math.max(.02,row[1].x-.025));
-  else if(ref.i===1)nx=clamp(nx,row[0].x+.025,.475);
-  else if(ref.i===2)nx=.5;
-  else if(ref.i===3)nx=clamp(nx,.525,row[4].x-.025);
-  else if(ref.i===4)nx=clamp(nx,row[3].x+.025,.99);
-  row[ref.i]={...row[ref.i],x:nx,y:ny};
-  if(s.mirror)syncLabelCameraMirror();
-}
+function setLabelCameraPoint(){ /* Photo mode now uses a simple handled capture box. */ }
 function getLabelCameraScaleHandles(canvas){
   const rect=getLabelCameraGuideRect(canvas),b=labelCameraGuideLocalBounds();
   const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
@@ -1821,7 +1812,7 @@ function updateLabelCameraUi(){
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Use the left pink › handle for width and the top pink › handle for height, then take the first photo inside the guide. MeshDoctor will handle the stitching afterwards.';
+    help.textContent='Use the left pink › handle for width and the top pink › handle for height, then take the first photo inside the guide. Photo mode will stitch the panorama for you automatically.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
@@ -1833,11 +1824,25 @@ function updateLabelCameraUi(){
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
   const ctx=canvas.getContext('2d'),rect=getLabelCameraGuideRect(canvas); ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(s.prevStrip){ const ghostW=rect.w*.18,ghostH=rect.h*.70,gx=rect.x+8,gy=rect.y+(rect.h-ghostH)/2; ctx.save(); ctx.globalAlpha=.42; ctx.drawImage(s.prevStrip.preview,gx,gy,ghostW,ghostH); ctx.restore(); ctx.save(); ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.setLineDash([10,8]); ctx.strokeRect(gx,gy,ghostW,ghostH); ctx.restore(); }
-  const topPts=s.points.top.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
-  const botPts=s.points.bottom.map(p=>({x:rect.x+p.x*rect.w,y:rect.y+p.y*rect.h}));
-  ctx.save(); ctx.fillStyle='rgba(53,207,255,.05)'; ctx.strokeStyle='rgba(83,225,255,.95)'; ctx.lineWidth=Math.max(2,canvas.width*.0018); ctx.shadowColor='rgba(53,207,255,.45)'; ctx.shadowBlur=10; ctx.beginPath(); smoothPath(ctx,topPts); for(let i=botPts.length-1;i>=0;i--){const p=botPts[i]; if(i===botPts.length-1) ctx.lineTo(p.x,p.y); else {const prev=botPts[i+1],mx=(prev.x+p.x)/2,my=(prev.y+p.y)/2; ctx.quadraticCurveTo(prev.x,prev.y,mx,my);} } if(botPts.length) ctx.lineTo(botPts[0].x,botPts[0].y); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
-  ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=rect.x+rect.w*.5; ctx.beginPath(); ctx.moveTo(cx,rect.y+rect.h*.08); ctx.lineTo(cx,rect.y+rect.h*.92); ctx.stroke(); ctx.restore();
+  if(s.prevStrip){
+    const ghostW=rect.w*.18,ghostH=rect.h*.70,gx=rect.x+8,gy=rect.y+(rect.h-ghostH)/2;
+    ctx.save(); ctx.globalAlpha=.42; ctx.drawImage(s.prevStrip.preview,gx,gy,ghostW,ghostH); ctx.restore();
+    ctx.save(); ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.setLineDash([10,8]); ctx.strokeRect(gx,gy,ghostW,ghostH); ctx.restore();
+  }
+  const b=labelCameraGuideLocalBounds();
+  const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
+  ctx.save();
+  ctx.fillStyle='rgba(53,207,255,.05)';
+  ctx.strokeStyle='rgba(83,225,255,.95)';
+  ctx.lineWidth=Math.max(2,canvas.width*.0018);
+  ctx.shadowColor='rgba(53,207,255,.45)';
+  ctx.shadowBlur=10;
+  ctx.beginPath();
+  ctx.rect(left,top,right-left,bottom-top);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=(left+right)/2; ctx.beginPath(); ctx.moveTo(cx,top); ctx.lineTo(cx,bottom); ctx.stroke(); ctx.restore();
   for(const h of getLabelCameraScaleHandles(canvas)){
     ctx.save();ctx.translate(h.x,h.y);ctx.rotate(h.angle);ctx.shadowColor='rgba(255,79,227,.92)';ctx.shadowBlur=Math.max(14,canvas.width*.012);ctx.fillStyle='#ff4fe3';ctx.font=`900 ${Math.max(32*(window.devicePixelRatio||1),canvas.width*.028)}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('›',0,-1);ctx.restore();
   }
@@ -1913,8 +1918,8 @@ function compareLumaSamples(a,b){if(!a||!b||a.w!==b.w||a.h!==b.h)return 0;let di
 function tickLabelCamera(now=performance.now()){
   const st=labelCameraGuideState;
   if(st){
-    if(!tickLabelCamera._lastUiAt||now-tickLabelCamera._lastUiAt>=50){drawLabelCameraOverlay();tickLabelCamera._lastUiAt=now;}
-    if(st.prevStrip&&now-st.lastSampleAt>=240){
+    if(!tickLabelCamera._lastUiAt||now-tickLabelCamera._lastUiAt>=80){drawLabelCameraOverlay();tickLabelCamera._lastUiAt=now;}
+    if(st.prevStrip&&now-st.lastSampleAt>=320){
       st.lastSampleAt=now;
       const current=sampleLabelCameraStrip('left');st.currentStrip=current;st.alignScore=compareLumaSamples(current,st.prevStrip);
       if(st.auto&&now-st.lastCaptureAt>1250&&st.alignScore>.81){st.matchFrames++;if(st.matchFrames>=3&&!labelCameraWorking)captureLabelCamera(true);}else st.matchFrames=0;
@@ -1946,17 +1951,40 @@ async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
   if(!navigator.mediaDevices?.getUserMedia){ const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.capture='environment'; input.onchange=()=>addLabelFiles(input.files||[]); input.click(); return; }
   try{
-    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:854},height:{ideal:480},aspectRatio:{ideal:16/9},frameRate:{ideal:20,max:20}},audio:false});
-    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
+    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:360},aspectRatio:{ideal:16/9},frameRate:{ideal:15,max:15}},audio:false});
+    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; labelCameraCaptures=[]; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
-function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
+function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return; labelCameraWorking=true;
   try{
-    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const crop=labelCameraSourceCrop(.06,.035)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}; const guideQuad=labelCameraGuideQuadForCrop(crop); const maxEdge=1400,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(crop.sw*scale)); c.height=Math.max(1,Math.round(crop.sh*scale)); c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.92); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); const quad=guideQuad?guideQuad.map(pt=>({x:pt.x,y:pt.y,corner:pt.corner})):null; labelItems.push(makeLabelItem(file,{quad})); labelSelectedId=null; renderLabelBuilder(); scheduleLabelProjectSave(); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
-    if(labelCameraGuideState){ const strip=sampleLabelCameraStrip('right'); if(strip){ labelCameraGuideState.prevStrip=strip; labelCameraGuideState.alignScore=0; labelCameraGuideState.matchFrames=0; labelCameraGuideState.lastCaptureAt=performance.now(); } updateLabelCameraUi(); drawLabelCameraOverlay(); }
-    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} added with the current guide shape.`);
+    const video=$('labelCameraVideo');
+    if(!video?.videoWidth)return;
+    const crop=labelCameraSourceCrop(.035,.03)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight};
+    const maxEdge=1400,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh));
+    const c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round(crop.sw*scale));
+    c.height=Math.max(1,Math.round(crop.sh*scale));
+    c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
+    const blob=await canvasBlob(c,'image/jpeg',.92);
+    if(!blob)return;
+    const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});
+    labelCameraCaptures.push(file);
+    labelCameraSessionCount++;
+    $('labelCameraCount').textContent=String(labelCameraSessionCount);
+    if(labelCameraGuideState){
+      const strip=sampleLabelCameraStrip('right');
+      if(strip){
+        labelCameraGuideState.prevStrip=strip;
+        labelCameraGuideState.alignScore=0;
+        labelCameraGuideState.matchFrames=0;
+        labelCameraGuideState.lastCaptureAt=performance.now();
+      }
+      updateLabelCameraUi();
+      drawLabelCameraOverlay();
+    }
+    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} captured.`);
   }finally{ labelCameraWorking=false; }
 }
 function defaultLabelMesh(){
@@ -2226,6 +2254,47 @@ async function stitchLabelPieces(pieces){
   }
   return out;
 }
+async function labelCameraFileToCanvas(file){
+  const bitmap=await createImageBitmap(file);
+  const c=document.createElement('canvas');
+  c.width=bitmap.width; c.height=bitmap.height;
+  c.getContext('2d').drawImage(bitmap,0,0);
+  bitmap.close?.();
+  return c;
+}
+async function finalizeLabelCameraSession(){
+  const count=labelCameraCaptures.length;
+  stopLabelCamera(false);
+  if(!count){
+    labelCameraCaptures=[];
+    if(views.label.classList.contains('active')) startHomeCameraBg();
+    return;
+  }
+  busy(true,'Stitching panoramic label…');
+  try{
+    const pieces=[];
+    for(let i=0;i<labelCameraCaptures.length;i++){
+      $('busyText').textContent=`Preparing panoramic shot · ${i+1}/${labelCameraCaptures.length}`;
+      pieces.push(await labelCameraFileToCanvas(labelCameraCaptures[i]));
+      await new Promise(r=>setTimeout(r,0));
+    }
+    $('busyText').textContent='Matching overlaps & stitching…';
+    const stitched=await stitchLabelPieces(pieces);
+    const ctx=stitched.getContext('2d',{willReadFrequently:true});
+    labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
+    labelCameraCaptures=[];
+    $('busyText').textContent='Opening final correction…';
+    await new Promise(r=>setTimeout(r,20));
+    startLabelPostStitchEditor(labelResultImage);
+  }catch(err){
+    console.error(err);
+    toast('Could not stitch the panoramic photo set. Try fewer photos with a little more overlap.');
+    showView('label');
+    renderLabelBuilder();
+  }finally{
+    busy(false);
+  }
+}
 async function buildLabelResult(){
   busy(true,'Preparing label sections…');
   try{
@@ -2324,8 +2393,8 @@ $('labelReplaceInput')?.addEventListener('change',e=>{const file=e.target.files?
 $('labelContinueBtn')?.addEventListener('pointerdown',burstCorrectButton);
 $('labelContinueBtn')?.addEventListener('click',startLabelAreaFlow);
 $('labelCameraCaptureBtn')?.addEventListener('click',()=>captureLabelCamera(false));
-$('labelCameraDoneBtn')?.addEventListener('click',stopLabelCamera);
-$('labelCameraCancelBtn')?.addEventListener('click',stopLabelCamera);
+$('labelCameraDoneBtn')?.addEventListener('click',finalizeLabelCameraSession);
+$('labelCameraCancelBtn')?.addEventListener('click',()=>{labelCameraCaptures=[];stopLabelCamera();});
 $('labelCameraMirrorToggle')?.addEventListener('change',ev=>{if(!labelCameraGuideState)return;ev.target.checked=true;labelCameraGuideState.mirror=true;syncLabelCameraMirror();drawLabelCameraOverlay();});
 $('labelCameraAutoToggle')?.addEventListener('change',ev=>{if(!labelCameraGuideState)return;labelCameraGuideState.auto=!!ev.target.checked;updateLabelCameraUi();});
 $('labelCameraResetGuideBtn')?.addEventListener('click',()=>{const prev=labelCameraGuideState?.prevStrip||null;resetLabelCameraGuide();if(labelCameraGuideState)labelCameraGuideState.prevStrip=prev;drawLabelCameraOverlay();});
@@ -2334,7 +2403,7 @@ $('labelCameraOverlay')?.addEventListener('pointermove',labelCameraPointerMove);
 $('labelCameraOverlay')?.addEventListener('pointerup',labelCameraPointerEnd);
 $('labelCameraOverlay')?.addEventListener('pointercancel',labelCameraPointerEnd);
 window.addEventListener('resize',()=>{if($('labelCameraDialog')?.open)drawLabelCameraOverlay();});
-$('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();stopLabelCamera();});
+$('labelCameraDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();labelCameraCaptures=[];stopLabelCamera();});
 $('labelAreaBackBtn')?.addEventListener('click',()=>showView('label'));
 $('labelAreaAutoBtn')?.addEventListener('click',()=>{const item=labelItems[labelAreaIndex];if(item){labelAreaPushHistory();item.quad=defaultLabelMesh();item.rotation=0;labelAreaSelectedIndex=-1;const slider=$('labelAreaRotationSlider'),out=$('labelAreaRotationValue');if(slider)slider.value='0';if(out)out.textContent='0.0°';drawLabelArea();toast('Reset to the base 4-point mesh.');}});
 $('labelApplyRemainingBtn')?.addEventListener('click',applyLabelAreaRemaining);
@@ -2426,4 +2495,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.13', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.14', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
