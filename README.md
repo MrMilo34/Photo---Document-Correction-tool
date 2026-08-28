@@ -1,9 +1,8 @@
-# MeshDoctor v1.6.14
+# MeshDoctor v1.6.15
 
-## What's new in v1.6.14
+## What's new in v1.6.15
 
-- **Photo mode panoramic capture now stitches directly** into the final correction step instead of adding each camera shot to the label table first.
-- **Manual uploads still use the label table**, so previously taken photos can still be ordered, selected, and stitched later.
-- The live photo guide is now a **simple straight-sided capture area** controlled by the pink width and height handles.
-- The live camera workload is reduced again for smoother phone performance.
-- Existing **Continue Last Project** support remains on the Label Maker table side.
+- **Live label-camera preview stays lightweight** for smoother phone performance.
+- **Captured label photos now save at higher quality** for better stitching and a sharper final output.
+- When available, MeshDoctor now uses the browser/device **high-resolution still capture path** during photo capture, while keeping the on-screen preview lower resolution.
+- Fallback behavior is preserved for devices that do not support the high-resolution capture API.

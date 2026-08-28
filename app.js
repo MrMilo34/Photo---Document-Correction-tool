@@ -61,6 +61,7 @@ let labelCameraGuideState=null;
 let labelCameraRaf=0;
 let labelCameraWorking=false;
 let labelCameraCaptures=[];
+let labelCameraImageCapture=null;
 let fileNameResolve=null;
 let labelProjectSaveTimer=0;
 let labelProjectRestoreAvailable=false;
@@ -1947,27 +1948,66 @@ function labelCameraPointerMove(ev){
   drawLabelCameraOverlay();ev.preventDefault();
 }
 function labelCameraPointerEnd(ev){const s=labelCameraGuideState,canvas=$('labelCameraOverlay');if(!s||!canvas)return;if(s.dragging?.pointerId===ev.pointerId)s.dragging=null;try{canvas.releasePointerCapture(ev.pointerId);}catch{}}
+async function captureLabelCameraSourceCanvas(video,crop){
+  const fallbackFromVideo=async()=>{
+    const c=document.createElement('canvas');
+    const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh));
+    c.width=Math.max(1,Math.round(crop.sw*scale));
+    c.height=Math.max(1,Math.round(crop.sh*scale));
+    c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
+    return c;
+  };
+  if(!labelCameraImageCapture) return fallbackFromVideo();
+  try{
+    let bitmap=null;
+    try{
+      const photoBlob=await labelCameraImageCapture.takePhoto();
+      bitmap=await createImageBitmap(photoBlob);
+    }catch(photoErr){
+      bitmap=await labelCameraImageCapture.grabFrame();
+    }
+    if(!bitmap) return fallbackFromVideo();
+    const sxScale=bitmap.width/Math.max(1,video.videoWidth);
+    const syScale=bitmap.height/Math.max(1,video.videoHeight);
+    const hsx=clamp(Math.round(crop.sx*sxScale),0,Math.max(0,bitmap.width-1));
+    const hsy=clamp(Math.round(crop.sy*syScale),0,Math.max(0,bitmap.height-1));
+    const hsw=clamp(Math.round(crop.sw*sxScale),1,bitmap.width-hsx);
+    const hsh=clamp(Math.round(crop.sh*syScale),1,bitmap.height-hsy);
+    const c=document.createElement('canvas');
+    const maxEdge=2200,scale=Math.min(1,maxEdge/Math.max(hsw,hsh));
+    c.width=Math.max(1,Math.round(hsw*scale));
+    c.height=Math.max(1,Math.round(hsh*scale));
+    c.getContext('2d').drawImage(bitmap,hsx,hsy,hsw,hsh,0,0,c.width,c.height);
+    bitmap.close?.();
+    return c;
+  }catch(err){
+    console.warn('High-res label capture fallback',err);
+    return fallbackFromVideo();
+  }
+}
+
 async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
   if(!navigator.mediaDevices?.getUserMedia){ const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.capture='environment'; input.onchange=()=>addLabelFiles(input.files||[]); input.click(); return; }
   try{
     labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:360},aspectRatio:{ideal:16/9},frameRate:{ideal:15,max:15}},audio:false});
+    const track=labelCameraStream.getVideoTracks?.()[0]||null;
+    labelCameraImageCapture=null;
+    if(track&&window.ImageCapture){
+      try{ labelCameraImageCapture=new ImageCapture(track); }catch(err){ console.warn('ImageCapture unavailable',err); }
+    }
     const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; labelCameraCaptures=[]; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
-function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
+function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; labelCameraImageCapture=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return; labelCameraWorking=true;
   try{
     const video=$('labelCameraVideo');
     if(!video?.videoWidth)return;
     const crop=labelCameraSourceCrop(.035,.03)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight};
-    const maxEdge=1400,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh));
-    const c=document.createElement('canvas');
-    c.width=Math.max(1,Math.round(crop.sw*scale));
-    c.height=Math.max(1,Math.round(crop.sh*scale));
-    c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
-    const blob=await canvasBlob(c,'image/jpeg',.92);
+    const c=await captureLabelCameraSourceCanvas(video,crop);
+    const blob=await canvasBlob(c,'image/jpeg',.96);
     if(!blob)return;
     const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'});
     labelCameraCaptures.push(file);
@@ -1984,7 +2024,7 @@ async function captureLabelCamera(fromAuto=false){
       updateLabelCameraUi();
       drawLabelCameraOverlay();
     }
-    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} captured.`);
+    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} captured in high quality.`);
   }finally{ labelCameraWorking=false; }
 }
 function defaultLabelMesh(){
@@ -2495,4 +2535,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.14', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.15', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
