@@ -1587,8 +1587,12 @@ function buildImagePdf(pages){
   parts.push(asciiBytes(xref));return new Blob(parts,{type:'application/pdf'});
 }
 
-function makeLabelItem(file){
-  return {id:`LBL-${Date.now().toString(36)}-${(++labelUid).toString(36)}`,name:file.name||`Label-${labelUid}.jpg`,blob:file,url:URL.createObjectURL(file),quad:null,rotation:0,mapView:{zoom:1,panX:0,panY:0}};
+function makeLabelItem(file,opts={}){
+  const item={id:`LBL-${Date.now().toString(36)}-${(++labelUid).toString(36)}`,name:file.name||`Label-${labelUid}.jpg`,blob:file,url:URL.createObjectURL(file),quad:null,rotation:0,mapView:{zoom:1,panX:0,panY:0}};
+  if(opts.quad)item.quad=cloneLabelMesh(opts.quad);
+  if(Number.isFinite(opts.rotation))item.rotation=Number(opts.rotation)||0;
+  if(opts.mapView)item.mapView={zoom:1,panX:0,panY:0,...opts.mapView};
+  return item;
 }
 function labelItemById(id){return labelItems.find(x=>x.id===id);}
 function revokeLabelItem(item){if(item?.url)try{URL.revokeObjectURL(item.url);}catch{}}
@@ -1727,7 +1731,7 @@ function getLabelCameraScaleHandles(canvas){
 function labelCameraNearestScaleHandle(x,y){
   const canvas=resizeLabelCameraOverlay();if(!canvas)return null;
   let best=null,bd=Infinity;for(const h of getLabelCameraScaleHandles(canvas)){const d=Math.hypot(h.x-x,h.y-y);if(d<bd){bd=d;best=h;}}
-  return bd<=34*(window.devicePixelRatio||1)?best:null;
+  return bd<=54*(window.devicePixelRatio||1)?{...best,distance:bd}:null;
 }
 function resizeLabelCameraOverlay(){
   const canvas=$('labelCameraOverlay'); if(!canvas)return null;
@@ -1743,7 +1747,7 @@ function updateLabelCameraUi(){
   if(first) first.classList.toggle('hidden',!!s.prevStrip);
   if(!help)return;
   if(!s.prevStrip){
-    help.textContent='Use the neon pink › handles to resize the capture area in width and height. Drag the mesh dots to shape the contour itself, then take the first photo.';
+    help.textContent='Use the neon pink › handles to resize the capture area in width and height. Drag the mesh dots to shape the label contour that will carry into the flattening step, then take the first photo.';
     return;
   }
   const pct=Math.round(s.alignScore*100);
@@ -1792,12 +1796,42 @@ function labelCameraSourceCrop(padX=.05,padY=.035){
   const w=b.right-b.left,h=b.bottom-b.top;
   return labelCameraDisplayRectToVideoSource(clamp(b.left-w*padX,0,1),clamp(b.top-h*padY,0,1),clamp(b.right+w*padX,0,1),clamp(b.bottom+h*padY,0,1));
 }
+function labelCameraDisplayPointToVideoSource(nx,ny){
+  const video=$('labelCameraVideo'),canvas=resizeLabelCameraOverlay();
+  if(!video?.videoWidth||!canvas)return null;
+  const dw=canvas.width,dh=canvas.height,vw=video.videoWidth,vh=video.videoHeight;
+  const scale=Math.max(dw/vw,dh/vh),rw=vw*scale,rh=vh*scale,ox=(dw-rw)/2,oy=(dh-rh)/2;
+  return {x:clamp((nx*dw-ox)/scale,0,vw-1),y:clamp((ny*dh-oy)/scale,0,vh-1)};
+}
+function labelCameraGuideQuadForCrop(crop){
+  const s=labelCameraGuideState;if(!s||!crop||crop.sw<2||crop.sh<2)return null;
+  const rect={x:.10,y:.11,w:.80,h:.74};
+  const mapPoint=pt=>{
+    const src=labelCameraDisplayPointToVideoSource(rect.x+pt.x*rect.w,rect.y+pt.y*rect.h);
+    if(!src)return null;
+    return {x:clamp((src.x-crop.sx)/crop.sw,0,1),y:clamp((src.y-crop.sy)/crop.sh,0,1)};
+  };
+  const top=s.points.top.map(mapPoint),bottom=s.points.bottom.map(mapPoint);
+  if([...top,...bottom].some(p=>!p))return null;
+  return [
+    {x:top[0].x,y:top[0].y,corner:0},
+    {x:top[1].x,y:top[1].y},
+    {x:top[2].x,y:top[2].y},
+    {x:top[3].x,y:top[3].y},
+    {x:top[4].x,y:top[4].y,corner:1},
+    {x:bottom[4].x,y:bottom[4].y,corner:2},
+    {x:bottom[3].x,y:bottom[3].y},
+    {x:bottom[2].x,y:bottom[2].y},
+    {x:bottom[1].x,y:bottom[1].y},
+    {x:bottom[0].x,y:bottom[0].y,corner:3}
+  ];
+}
 function sampleLabelCameraStrip(side='left'){
   const s=labelCameraGuideState,video=$('labelCameraVideo'); if(!s||!video?.videoWidth)return null;
   const b=labelCameraGuideBoundsNormalized(),w=b.right-b.left,h=b.bottom-b.top;
   const stripW=Math.max(.02,w*.18),left=side==='left'?b.left:b.right-stripW;
   const crop=labelCameraDisplayRectToVideoSource(left,b.top+h*.10,left+stripW,b.bottom-h*.10); if(!crop)return null;
-  let c=s.sampleCanvas; if(!c){c=document.createElement('canvas');c.width=28;c.height=64;s.sampleCanvas=c;}
+  let c=s.sampleCanvas; if(!c){c=document.createElement('canvas');c.width=20;c.height=48;s.sampleCanvas=c;}
   const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
   const d=ctx.getImageData(0,0,c.width,c.height).data,out=new Uint8Array(c.width*c.height);
   for(let i=0,j=0;i<d.length;i+=4,j++)out[j]=Math.round(.2126*d[i]+.7152*d[i+1]+.0722*d[i+2]);
@@ -1806,12 +1840,15 @@ function sampleLabelCameraStrip(side='left'){
 }
 function compareLumaSamples(a,b){if(!a||!b||a.w!==b.w||a.h!==b.h)return 0;let diff=0;for(let i=0;i<a.data.length;i++)diff+=Math.abs(a.data[i]-b.data[i]);return clamp(1-(diff/(a.data.length*255)),0,1);}
 function tickLabelCamera(now=performance.now()){
-  drawLabelCameraOverlay(); const st=labelCameraGuideState;
-  if(st?.prevStrip&&now-st.lastSampleAt>=190){
-    st.lastSampleAt=now;
-    const current=sampleLabelCameraStrip('left');st.currentStrip=current;st.alignScore=compareLumaSamples(current,st.prevStrip);
-    if(st.auto&&now-st.lastCaptureAt>1100&&st.alignScore>.81){st.matchFrames++;if(st.matchFrames>=4&&!labelCameraWorking)captureLabelCamera(true);}else st.matchFrames=0;
-    updateLabelCameraUi();
+  const st=labelCameraGuideState;
+  if(st){
+    if(!tickLabelCamera._lastUiAt||now-tickLabelCamera._lastUiAt>=50){drawLabelCameraOverlay();tickLabelCamera._lastUiAt=now;}
+    if(st.prevStrip&&now-st.lastSampleAt>=240){
+      st.lastSampleAt=now;
+      const current=sampleLabelCameraStrip('left');st.currentStrip=current;st.alignScore=compareLumaSamples(current,st.prevStrip);
+      if(st.auto&&now-st.lastCaptureAt>1250&&st.alignScore>.81){st.matchFrames++;if(st.matchFrames>=3&&!labelCameraWorking)captureLabelCamera(true);}else st.matchFrames=0;
+      updateLabelCameraUi();
+    }
   }
   labelCameraRaf=requestAnimationFrame(tickLabelCamera);
 }
@@ -1820,11 +1857,12 @@ function labelCameraEventPos(ev){
   const canvas=resizeLabelCameraOverlay();if(!canvas)return null;const r=canvas.getBoundingClientRect();
   return {x:(ev.clientX-r.left)*(canvas.width/r.width),y:(ev.clientY-r.top)*(canvas.height/r.height)};
 }
-function labelCameraNearestRef(x,y){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay();if(!s||!canvas)return null;const rect=getLabelCameraGuideRect(canvas);let best=null,bd=Infinity;for(const ref of getLabelCameraEditableRefs()){const p=labelCameraPointToPixel(ref,rect),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=ref;}}return bd<=42*(window.devicePixelRatio||1)?best:null;}
+function labelCameraNearestRef(x,y){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay();if(!s||!canvas)return null;const rect=getLabelCameraGuideRect(canvas);let best=null,bd=Infinity;for(const ref of getLabelCameraEditableRefs()){const p=labelCameraPointToPixel(ref,rect),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=ref;}}return bd<=30*(window.devicePixelRatio||1)?{...best,distance:bd}:null;}
 function labelCameraPointerDown(ev){
   const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;try{canvas.setPointerCapture(ev.pointerId);}catch{}
-  const ref=labelCameraNearestRef(pos.x,pos.y);if(ref){s.dragging={pointerId:ev.pointerId,type:'point',ref};ev.preventDefault();return;}
-  const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y);if(scaleHandle){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();}
+  const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y),ref=labelCameraNearestRef(pos.x,pos.y);
+  if(scaleHandle&&(!ref||scaleHandle.distance<=ref.distance*1.35)){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();return;}
+  if(ref){s.dragging={pointerId:ev.pointerId,type:'point',ref};ev.preventDefault();}
 }
 function labelCameraPointerMove(ev){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos||!s.dragging||s.dragging.pointerId!==ev.pointerId)return;
@@ -1838,7 +1876,7 @@ async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
   if(!navigator.mediaDevices?.getUserMedia){ const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.capture='environment'; input.onchange=()=>addLabelFiles(input.files||[]); input.click(); return; }
   try{
-    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:540},aspectRatio:{ideal:16/9},frameRate:{ideal:24,max:24}},audio:false});
+    labelCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:854},height:{ideal:480},aspectRatio:{ideal:16/9},frameRate:{ideal:20,max:20}},audio:false});
     const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
@@ -1846,9 +1884,9 @@ function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCamera
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return; labelCameraWorking=true;
   try{
-    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const crop=labelCameraSourceCrop(.06,.035)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}; const maxEdge=1600,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(crop.sw*scale)); c.height=Math.max(1,Math.round(crop.sh*scale)); c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.94); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); addLabelFiles([file]); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
+    const video=$('labelCameraVideo'); if(!video?.videoWidth)return; const crop=labelCameraSourceCrop(.06,.035)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}; const guideQuad=labelCameraGuideQuadForCrop(crop); const maxEdge=1400,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh)); const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(crop.sw*scale)); c.height=Math.max(1,Math.round(crop.sh*scale)); c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height); const blob=await canvasBlob(c,'image/jpeg',.92); if(!blob)return; const file=new File([blob],`Label-Camera-${Date.now()}-${labelCameraSessionCount+1}.jpg`,{type:'image/jpeg'}); const quad=guideQuad?guideQuad.map(pt=>({x:pt.x,y:pt.y,corner:pt.corner})):null; labelItems.push(makeLabelItem(file,{quad})); labelSelectedId=null; renderLabelBuilder(); labelCameraSessionCount++; $('labelCameraCount').textContent=String(labelCameraSessionCount);
     if(labelCameraGuideState){ const strip=sampleLabelCameraStrip('right'); if(strip){ labelCameraGuideState.prevStrip=strip; labelCameraGuideState.alignScore=0; labelCameraGuideState.matchFrames=0; labelCameraGuideState.lastCaptureAt=performance.now(); } updateLabelCameraUi(); drawLabelCameraOverlay(); }
-    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} added.`);
+    toast(fromAuto?`Auto captured photo ${labelCameraSessionCount}.`:`Photo ${labelCameraSessionCount} added with the current guide shape.`);
   }finally{ labelCameraWorking=false; }
 }
 function defaultLabelMesh(){
@@ -2254,4 +2292,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.11', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.12', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
