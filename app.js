@@ -67,6 +67,9 @@ let labelProjectSaveTimer=0;
 let labelProjectRestoreAvailable=false;
 const LABEL_CAMERA_PREVIEW_MAX_W = 1600;
 const LABEL_CAMERA_PREVIEW_H = 120;
+const LABEL_CAMERA_ASSIST_X = .18;
+const LABEL_CAMERA_ASSIST_Y = .025;
+const LABEL_CAMERA_GHOST_RATIO = .24;
 
 
 let points = [];
@@ -1749,6 +1752,13 @@ function defaultLabelCameraGuideState(){
     lastPreviewAt:0,
     liveNewRatio:0,
     loopHint:false,
+    ghostPreview:null,
+    ghostVersion:0,
+    peakScore:0,
+    previousScore:0,
+    peakNewRatio:0,
+    scoreDropFrames:0,
+    guideLocked:false,
     instruction:'Line the label up inside the guide, take the first narrow photo, then rotate slowly for overlap.'
   };
 }
@@ -1774,7 +1784,7 @@ function labelCameraGuideLocalBounds(){
   };
 }
 function scaleLabelCameraGuide(edge,value){
-  const s=labelCameraGuideState;if(!s)return;
+  const s=labelCameraGuideState;if(!s||s.guideLocked)return;
   const b=labelCameraGuideLocalBounds(),minSpan=.08;
   const rows=['top','bottom'];
   if(edge==='left'||edge==='right'){
@@ -1920,36 +1930,36 @@ function updateLabelCameraUi(){
   const pct=Math.round(s.alignScore*100);
   if(s.loopHint){help.textContent='Starting area detected again · the label loop looks complete. Tap Done when ready.';help.classList.add('match-loop');return;}
   if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent=`Good overlap · ${pct}% match. Saving a high-quality keyframe in the background.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.78){help.textContent=`Good overlap · ${pct}% match. Keep rotating slowly.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.64){help.textContent=`Almost aligned · ${pct}% match. Keep the label inside the frame and rotate slowly.`;help.classList.add('match-almost');return;}
+  if(s.alignScore>.72){help.textContent=`Good overlap · ${pct}% match. Keep rotating slowly.`;help.classList.add('match-good');return;}
+  if(s.alignScore>.60){help.textContent=`Almost aligned · ${pct}% match. Keep the label inside the frame and rotate slowly.`;help.classList.add('match-almost');return;}
   help.textContent=`Looking for matching label pixels · ${pct}% match. Slow down or move back slightly.`;
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
   const ctx=canvas.getContext('2d'),rect=getLabelCameraGuideRect(canvas); ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(s.prevStrip){
-    const ghostW=rect.w*.18,ghostH=rect.h*.70,gx=rect.x+8,gy=rect.y+(rect.h-ghostH)/2;
-    ctx.save(); ctx.globalAlpha=.42; ctx.drawImage(s.prevStrip.preview,gx,gy,ghostW,ghostH); ctx.restore();
-    ctx.save(); ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.setLineDash([10,8]); ctx.strokeRect(gx,gy,ghostW,ghostH); ctx.restore();
-  }
   const b=labelCameraGuideLocalBounds();
   const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
-  ctx.save();
-  ctx.fillStyle='rgba(53,207,255,.05)';
-  ctx.strokeStyle='rgba(83,225,255,.95)';
-  ctx.lineWidth=Math.max(2,canvas.width*.0018);
-  ctx.shadowColor='rgba(53,207,255,.45)';
-  ctx.shadowBlur=10;
-  ctx.beginPath();
-  ctx.rect(left,top,right-left,bottom-top);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-  ctx.save(); ctx.strokeStyle='rgba(255,79,227,.78)'; ctx.lineWidth=1.3; ctx.setLineDash([8,10]); const cx=(left+right)/2; ctx.beginPath(); ctx.moveTo(cx,top); ctx.lineTo(cx,bottom); ctx.stroke(); ctx.restore();
-  for(const h of getLabelCameraScaleHandles(canvas)){
-    ctx.save();ctx.translate(h.x,h.y);ctx.rotate(h.angle);ctx.shadowColor='rgba(255,79,227,.92)';ctx.shadowBlur=Math.max(14,canvas.width*.012);ctx.fillStyle='#ff4fe3';ctx.font=`900 ${Math.max(32*(window.devicePixelRatio||1),canvas.width*.028)}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('›',0,-1);ctx.restore();
+  const direction=s.previewDirection||'right',ghost=s.ghostPreview||s.prevStrip?.preview||null;
+  if(ghost){
+    const ghostW=Math.max(24*(window.devicePixelRatio||1),(right-left)*LABEL_CAMERA_GHOST_RATIO);
+    const gx=direction==='left'?right-ghostW:left,gy=top,gh=bottom-top;
+    ctx.save();
+    ctx.beginPath();ctx.rect(gx,gy,ghostW,gh);ctx.clip();ctx.globalAlpha=.46;ctx.drawImage(ghost,gx,gy,ghostW,gh);ctx.restore();
+    ctx.save();ctx.strokeStyle='rgba(255,79,227,.84)';ctx.lineWidth=Math.max(1.5,canvas.width*.0014);ctx.setLineDash([7,6]);
+    const targetX=direction==='left'?gx:gx+ghostW;ctx.beginPath();ctx.moveTo(targetX,top);ctx.lineTo(targetX,bottom);ctx.stroke();ctx.restore();
+    ctx.save();ctx.font=`700 ${Math.max(11*(window.devicePixelRatio||1),canvas.width*.009)}px system-ui, sans-serif`;ctx.fillStyle='rgba(235,247,255,.92)';ctx.fillText('Align next section here',gx+8,top+22*(window.devicePixelRatio||1));ctx.restore();
   }
-  if(s.prevStrip){ ctx.save(); ctx.font=`${Math.max(12,canvas.width*.011)}px system-ui, sans-serif`; ctx.fillStyle='rgba(230,244,255,.92)'; ctx.fillText('Ghosted overlap',rect.x+12,rect.y+rect.h*.20); ctx.restore(); }
+  ctx.save();
+  ctx.fillStyle='rgba(53,207,255,.035)';ctx.strokeStyle='rgba(83,225,255,.98)';ctx.lineWidth=Math.max(2,canvas.width*.0018);ctx.shadowColor='rgba(53,207,255,.42)';ctx.shadowBlur=8;
+  ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.fill();ctx.stroke();ctx.restore();
+  ctx.save();ctx.strokeStyle='rgba(255,79,227,.72)';ctx.lineWidth=1.3;ctx.setLineDash([8,10]);const cx=(left+right)/2;ctx.beginPath();ctx.moveTo(cx,top);ctx.lineTo(cx,bottom);ctx.stroke();ctx.restore();
+  if(!s.guideLocked){
+    for(const h of getLabelCameraScaleHandles(canvas)){
+      ctx.save();ctx.translate(h.x,h.y);ctx.rotate(h.angle);ctx.shadowColor='rgba(255,79,227,.92)';ctx.shadowBlur=Math.max(14,canvas.width*.012);ctx.fillStyle='#ff4fe3';ctx.font=`900 ${Math.max(32*(window.devicePixelRatio||1),canvas.width*.028)}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('›',0,-1);ctx.restore();
+    }
+  }else{
+    ctx.save();ctx.font=`700 ${Math.max(10*(window.devicePixelRatio||1),canvas.width*.0085)}px system-ui, sans-serif`;ctx.fillStyle='rgba(159,231,255,.86)';ctx.textAlign='right';ctx.fillText('Capture area locked',right-6,top-10);ctx.restore();
+  }
   updateLabelCameraUi();
 }
 function stopLabelCameraLoop(){if(labelCameraRaf){cancelAnimationFrame(labelCameraRaf);labelCameraRaf=0;}}
@@ -1974,6 +1984,46 @@ function labelCameraSourceCrop(padX=.05,padY=.035){
   const b=labelCameraGuideBoundsNormalized();
   const w=b.right-b.left,h=b.bottom-b.top;
   return labelCameraDisplayRectToVideoSource(clamp(b.left-w*padX,0,1),clamp(b.top-h*padY,0,1),clamp(b.right+w*padX,0,1),clamp(b.bottom+h*padY,0,1));
+}
+function labelCameraCaptureGeometry(){
+  const b=labelCameraGuideBoundsNormalized(),w=b.right-b.left,h=b.bottom-b.top;
+  const core=labelCameraDisplayRectToVideoSource(b.left,b.top,b.right,b.bottom);
+  const assist=labelCameraDisplayRectToVideoSource(
+    clamp(b.left-w*LABEL_CAMERA_ASSIST_X,0,1),
+    clamp(b.top-h*LABEL_CAMERA_ASSIST_Y,0,1),
+    clamp(b.right+w*LABEL_CAMERA_ASSIST_X,0,1),
+    clamp(b.bottom+h*LABEL_CAMERA_ASSIST_Y,0,1)
+  );
+  if(!core||!assist)return null;
+  return {core,assist};
+}
+function labelCameraRectNorm(rect,video){
+  return {
+    x:clamp(rect.sx/Math.max(1,video.videoWidth),0,1),
+    y:clamp(rect.sy/Math.max(1,video.videoHeight),0,1),
+    w:clamp(rect.sw/Math.max(1,video.videoWidth),.001,1),
+    h:clamp(rect.sh/Math.max(1,video.videoHeight),.001,1)
+  };
+}
+function labelCameraLiveGhostPreview(side='right'){
+  const video=$('labelCameraVideo'),geom=labelCameraCaptureGeometry();if(!video?.videoWidth||!geom)return null;
+  const core=geom.core,ratio=LABEL_CAMERA_GHOST_RATIO;
+  const sx=side==='left'?core.sx:core.sx+core.sw*(1-ratio),sw=Math.max(2,core.sw*ratio);
+  const out=document.createElement('canvas');
+  const targetH=360,scale=targetH/Math.max(1,core.sh);out.width=Math.max(72,Math.round(sw*scale));out.height=targetH;
+  out.getContext('2d').drawImage(video,sx,core.sy,sw,core.sh,0,0,out.width,out.height);
+  return out;
+}
+async function labelCameraGhostFromCapture(capture,side='right'){
+  const meta=await labelCameraCaptureToCanvas(capture,{withMeta:true,maxEdge:1400,mode:'assist'});
+  if(!meta?.canvas||!meta.coreRect)return null;
+  const {canvas,coreRect}=meta,ratio=LABEL_CAMERA_GHOST_RATIO;
+  const sx=side==='left'?coreRect.x:coreRect.x+coreRect.w*(1-ratio),sw=Math.max(2,coreRect.w*ratio);
+  const out=document.createElement('canvas');
+  const targetH=Math.min(720,Math.max(360,Math.round(coreRect.h)));const scale=targetH/Math.max(1,coreRect.h);
+  out.width=Math.max(96,Math.round(sw*scale));out.height=targetH;
+  out.getContext('2d').drawImage(canvas,sx,coreRect.y,sw,coreRect.h,0,0,out.width,out.height);
+  return out;
 }
 function labelCameraDisplayPointToVideoSource(nx,ny){
   const video=$('labelCameraVideo'),canvas=resizeLabelCameraOverlay();
@@ -2025,9 +2075,17 @@ function tickLabelCamera(now=performance.now()){
     if(st.previewPanorama&&now-st.lastPreviewAt>=180){
       st.lastPreviewAt=now;const motion=advanceLabelCameraPreviewFromLive();
       if(motion){
-        const enoughNew=st.previewAdvance>=Math.max(18,motion.frameWidth*.30);
-        if(st.auto&&motion.score>.72&&enoughNew&&now-st.lastCaptureAt>900&&!labelCameraWorking){captureLabelCamera(true);}
-        updateLabelCameraUi();
+        const score=motion.score,enoughNew=st.previewAdvance>=Math.max(14,motion.frameWidth*.22);
+        if(score>st.peakScore){st.peakScore=score;st.peakNewRatio=motion.newRatio;st.scoreDropFrames=0;}
+        else if(st.peakScore>=.62&&score<st.peakScore-.022)st.scoreDropFrames++;
+        else if(score>=st.peakScore-.012)st.scoreDropFrames=0;
+        const localPeak=enoughNew&&st.peakScore>=.64&&st.scoreDropFrames>=1;
+        const strongNow=enoughNew&&score>=.78;
+        if(st.auto&&(localPeak||strongNow)&&now-st.lastCaptureAt>760&&!labelCameraWorking){
+          captureLabelCamera(true);
+          st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
+        }
+        st.previousScore=score;updateLabelCameraUi();
       }
     }
   }
@@ -2040,7 +2098,9 @@ function labelCameraEventPos(ev){
 }
 function labelCameraNearestRef(x,y){const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay();if(!s||!canvas)return null;const rect=getLabelCameraGuideRect(canvas);let best=null,bd=Infinity;for(const ref of getLabelCameraEditableRefs()){const p=labelCameraPointToPixel(ref,rect),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=ref;}}return bd<=30*(window.devicePixelRatio||1)?{...best,distance:bd}:null;}
 function labelCameraPointerDown(ev){
-  const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;try{canvas.setPointerCapture(ev.pointerId);}catch{}
+  const s=labelCameraGuideState,canvas=$('labelCameraOverlay'),pos=labelCameraEventPos(ev);if(!s||!canvas||!pos)return;
+  if(s.guideLocked)return;
+  try{canvas.setPointerCapture(ev.pointerId);}catch{}
   const scaleHandle=labelCameraNearestScaleHandle(pos.x,pos.y);
   if(scaleHandle){s.dragging={pointerId:ev.pointerId,type:'scale',edge:scaleHandle.edge};ev.preventDefault();}
 }
@@ -2052,13 +2112,16 @@ function labelCameraPointerMove(ev){
   drawLabelCameraOverlay();ev.preventDefault();
 }
 function labelCameraPointerEnd(ev){const s=labelCameraGuideState,canvas=$('labelCameraOverlay');if(!s||!canvas)return;if(s.dragging?.pointerId===ev.pointerId)s.dragging=null;try{canvas.releasePointerCapture(ev.pointerId);}catch{}}
-async function captureLabelCameraHighResRecord(video,crop){
-  const cropNorm={x:clamp(crop.sx/Math.max(1,video.videoWidth),0,1),y:clamp(crop.sy/Math.max(1,video.videoHeight),0,1),w:clamp(crop.sw/Math.max(1,video.videoWidth),.001,1),h:clamp(crop.sh/Math.max(1,video.videoHeight),.001,1)};
+async function captureLabelCameraHighResRecord(video,geometry){
+  const core=geometry?.core,assist=geometry?.assist;if(!core||!assist)return null;
+  const coreNorm=labelCameraRectNorm(core,video),assistNorm=labelCameraRectNorm(assist,video);
   if(labelCameraImageCapture){
-    try{const blob=await labelCameraImageCapture.takePhoto();if(blob)return {blob,cropNorm,highRes:true};}catch(err){console.warn('High-resolution still capture unavailable',err);}
+    try{const blob=await labelCameraImageCapture.takePhoto();if(blob)return {blob,coreNorm,assistNorm,highRes:true};}catch(err){console.warn('High-resolution still capture unavailable',err);}
   }
-  const c=document.createElement('canvas'),maxEdge=1600,scale=Math.min(1,maxEdge/Math.max(crop.sw,crop.sh));c.width=Math.max(1,Math.round(crop.sw*scale));c.height=Math.max(1,Math.round(crop.sh*scale));c.getContext('2d').drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,c.width,c.height);
-  const blob=await canvasBlob(c,'image/jpeg',.95);return blob?{blob,cropNorm:null,highRes:false}:null;
+  const c=document.createElement('canvas'),maxEdge=1800,scale=Math.min(1,maxEdge/Math.max(assist.sw,assist.sh));c.width=Math.max(1,Math.round(assist.sw*scale));c.height=Math.max(1,Math.round(assist.sh*scale));c.getContext('2d').drawImage(video,assist.sx,assist.sy,assist.sw,assist.sh,0,0,c.width,c.height);
+  const blob=await canvasBlob(c,'image/jpeg',.96);
+  const coreWithinAssist={x:clamp((core.sx-assist.sx)/assist.sw,0,1),y:clamp((core.sy-assist.sy)/assist.sh,0,1),w:clamp(core.sw/assist.sw,.001,1),h:clamp(core.sh/assist.sh,.001,1)};
+  return blob?{blob,coreWithinAssist,highRes:false}:null;
 }
 async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
@@ -2077,17 +2140,25 @@ function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCamera
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return;const video=$('labelCameraVideo');if(!video?.videoWidth)return;
   const st=labelCameraGuideState;if(st&&!st.previewPanorama)seedLabelCameraPreviewFromLive();
-  labelCameraWorking=true;if(st)st.lastCaptureAt=performance.now();updateLabelCameraUi();
+  const geometry=labelCameraCaptureGeometry();if(!geometry)return;
+  labelCameraWorking=true;if(st){st.lastCaptureAt=performance.now();st.guideLocked=true;}
+  const direction=st?.previewDirection||'right';
+  if(st){st.ghostPreview=labelCameraLiveGhostPreview(direction==='left'?'left':'right')||st.ghostPreview;}
+  updateLabelCameraUi();drawLabelCameraOverlay();
   try{
-    const crop=labelCameraSourceCrop(.035,.03)||{sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight};
-    const record=await captureLabelCameraHighResRecord(video,crop);if(!record)return;
+    const record=await captureLabelCameraHighResRecord(video,geometry);if(!record)return;
+    record.direction=direction;record.order=labelCameraSessionCount;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);
     if(labelCameraGuideState){
-      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.lastCaptureAt=performance.now();
-      const strip=sampleLabelCameraStrip('right');if(strip)labelCameraGuideState.prevStrip=strip;
+      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;
+      const strip=sampleLabelCameraStrip(direction==='left'?'left':'right');if(strip)labelCameraGuideState.prevStrip=strip;
+      const ghostVersion=++labelCameraGuideState.ghostVersion;
+      labelCameraGhostFromCapture(record,direction==='left'?'left':'right').then(ghost=>{
+        const current=labelCameraGuideState;if(current&&ghost&&current.ghostVersion===ghostVersion){current.ghostPreview=ghost;drawLabelCameraOverlay();}
+      }).catch(err=>console.warn('Could not build HQ ghost reference',err));
       updateLabelCameraUi();drawLabelCameraOverlay();
     }
-    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved.`:`First HQ section captured. Rotate the item slowly.`);
+    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved at the best overlap.`:`First HQ section captured. The capture area is now locked.`);
   }finally{labelCameraWorking=false;updateLabelCameraUi();}
 }
 function defaultLabelMesh(){
@@ -2304,53 +2375,55 @@ function canvasToGraySample(canvas,maxW=240,maxH=180){
   for(let i=0,j=0;i<data.length;i+=4,j++)gray[j]=Math.round(.299*data[i]+.587*data[i+1]+.114*data[i+2]);
   return {w,h,data:gray};
 }
-function scoreGrayOverlap(a,b,ow,dy=0){
-  const top=Math.max(0,Math.round(a.h*.06)),bottom=Math.min(a.h,b.h)-Math.max(1,Math.round(a.h*.06));
-  let diff=0,count=0;
-  for(let y=top;y<bottom;y+=2){
-    const by=y+dy; if(by<top||by>=bottom) continue;
-    const aRow=y*a.w + (a.w-ow), bRow=by*b.w;
-    for(let x=0;x<ow;x+=2){ diff += Math.abs(a.data[aRow+x]-b.data[bRow+x]); count++; }
-  }
-  return count?1-(diff/(count*255)):0;
+function scoreGrayOverlapBand(a,b,ow,dy=0,y0=0,y1=null){
+  const top=Math.max(1,Math.round(y0)),bottom=Math.min(a.h,b.h,Math.round(y1??Math.min(a.h,b.h)-1));let diff=0,count=0;
+  for(let y=top;y<bottom;y+=2){const by=y+dy;if(by<0||by>=b.h)continue;const aRow=y*a.w+(a.w-ow),bRow=by*b.w;for(let x=0;x<ow;x+=2){diff+=Math.abs(a.data[aRow+x]-b.data[bRow+x]);count++;}}
+  return count?1-diff/(count*255):0;
 }
+function scoreGrayOverlap(a,b,ow,dy=0){return scoreGrayOverlapBand(a,b,ow,dy,Math.max(0,a.h*.05),Math.min(a.h,b.h)*.95);}
+function bestLabelBandShift(a,b,ow,y0,y1){let best={score:-1,dy:0};for(let dy=-12;dy<=12;dy++){const score=scoreGrayOverlapBand(a,b,ow,dy,y0,y1);if(score>best.score)best={score,dy};}return best;}
 function estimateLabelOverlap(prevCanvas,nextCanvas){
-  const a=canvasToGraySample(prevCanvas),b=canvasToGraySample(nextCanvas),minW=Math.min(a.w,b.w);
-  const step=Math.max(2,Math.round(minW/44));
-  const minOw=Math.max(18,Math.round(minW*.10)),maxOw=Math.max(minOw+step,Math.round(minW*.78));
-  let best={score:-1,ow:minOw,dy:0};
-  for(let ow=minOw;ow<=maxOw;ow+=step){
-    for(let dy=-10;dy<=10;dy+=2){const score=scoreGrayOverlap(a,b,ow,dy);if(score>best.score)best={score,ow,dy};}
-  }
-  const xScale=Math.min(prevCanvas.width/a.w,nextCanvas.width/b.w),yScale=Math.min(prevCanvas.height/a.h,nextCanvas.height/b.h);
-  return {overlap:Math.max(0,Math.round(best.ow*xScale)),score:best.score,dy:Math.round(best.dy*yScale)};
+  const a=canvasToGraySample(prevCanvas),b=canvasToGraySample(nextCanvas),minW=Math.min(a.w,b.w);const step=Math.max(2,Math.round(minW/48)),minOw=Math.max(18,Math.round(minW*.12)),maxOw=Math.max(minOw+step,Math.round(minW*.78));let best={score:-1,ow:minOw,dy:0};
+  for(let ow=minOw;ow<=maxOw;ow+=step){for(let dy=-10;dy<=10;dy+=2){const score=scoreGrayOverlap(a,b,ow,dy);if(score>best.score)best={score,ow,dy};}}
+  const mid=Math.min(a.h,b.h)/2,topShift=bestLabelBandShift(a,b,best.ow,2,mid),bottomShift=bestLabelBandShift(a,b,best.ow,mid,Math.min(a.h,b.h)-2),xScale=Math.min(prevCanvas.width/a.w,nextCanvas.width/b.w),yScale=Math.min(prevCanvas.height/a.h,nextCanvas.height/b.h);
+  return {overlap:Math.max(0,Math.round(best.ow*xScale)),score:best.score,dy:Math.round(best.dy*yScale),dyTop:Math.round(topShift.dy*yScale),dyBottom:Math.round(bottomShift.dy*yScale)};
+}
+function morphLabelPieceForSeam(piece,est){
+  const top=Number(est?.dyTop)||Number(est?.dy)||0,bottom=Number(est?.dyBottom)||Number(est?.dy)||0,h=Math.max(1,piece.height),scaleY=clamp(1+(top-bottom)/h,.965,1.035),translate=-top;
+  const out=document.createElement('canvas');out.width=piece.width;out.height=piece.height;const ctx=out.getContext('2d');ctx.setTransform(1,0,0,scaleY,0,translate);ctx.drawImage(piece,0,0);ctx.setTransform(1,0,0,1,0,0);return out;
 }
 async function stitchLabelPieces(pieces){
   if(!pieces?.length)throw new Error('No label pieces');if(pieces.length===1)return pieces[0];
-  const links=[],positions=[{x:0,y:0}];let minY=0,maxY=pieces[0].height,totalW=pieces[0].width;
+  const working=[pieces[0]],links=[],positions=[{x:0,y:0}];let minY=0,maxY=pieces[0].height,totalW=pieces[0].width;
   for(let i=1;i<pieces.length;i++){
-    const est=estimateLabelOverlap(pieces[i-1],pieces[i]),fallback=Math.round(Math.min(pieces[i-1].width,pieces[i].width)*.16),overlap=clamp(est.score>.34?est.overlap:fallback,0,Math.min(pieces[i-1].width-4,pieces[i].width-4));
-    const prev=positions[i-1],x=prev.x+pieces[i-1].width-overlap,y=prev.y-(est.score>.34?est.dy:0);positions.push({x,y});links.push({overlap,score:est.score});totalW=Math.max(totalW,x+pieces[i].width);minY=Math.min(minY,y);maxY=Math.max(maxY,y+pieces[i].height);
+    const raw=pieces[i],est=estimateLabelOverlap(working[i-1],raw),piece=morphLabelPieceForSeam(raw,est);working.push(piece);
+    const fallback=Math.round(Math.min(working[i-1].width,piece.width)*.18),overlap=clamp(est.score>.32?est.overlap:fallback,0,Math.min(working[i-1].width-4,piece.width-4));
+    const prev=positions[i-1],x=prev.x+working[i-1].width-overlap,y=prev.y;positions.push({x,y});links.push({overlap,score:est.score});totalW=Math.max(totalW,x+piece.width);minY=Math.min(minY,y);maxY=Math.max(maxY,y+piece.height);
   }
-  const out=document.createElement('canvas');out.width=Math.max(1,Math.ceil(totalW));out.height=Math.max(1,Math.ceil(maxY-minY));const ctx=out.getContext('2d');
-  ctx.drawImage(pieces[0],positions[0].x,positions[0].y-minY);
-  for(let i=1;i<pieces.length;i++){
-    const piece=pieces[i],pos=positions[i],overlap=links[i-1].overlap,y=pos.y-minY;
+  const out=document.createElement('canvas');out.width=Math.max(1,Math.ceil(totalW));out.height=Math.max(1,Math.ceil(maxY-minY));const ctx=out.getContext('2d');ctx.drawImage(working[0],positions[0].x,positions[0].y-minY);
+  for(let i=1;i<working.length;i++){
+    const piece=working[i],pos=positions[i],overlap=links[i-1].overlap,y=pos.y-minY;
     if(overlap>0){
-      const blend=Math.min(overlap,Math.max(12,Math.round(overlap*.72))),tmp=document.createElement('canvas');tmp.width=blend;tmp.height=piece.height;const tx=tmp.getContext('2d');
-      tx.drawImage(piece,Math.max(0,overlap-blend),0,blend,piece.height,0,0,blend,piece.height);tx.globalCompositeOperation='destination-in';const g=tx.createLinearGradient(0,0,blend,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,blend,piece.height);tx.globalCompositeOperation='source-over';
-      ctx.drawImage(tmp,pos.x+overlap-blend,y);if(piece.width>overlap)ctx.drawImage(piece,overlap,0,piece.width-overlap,piece.height,pos.x+overlap,y,piece.width-overlap,piece.height);
+      const blend=Math.min(overlap,Math.max(18,Math.round(overlap*.84))),tmp=document.createElement('canvas');tmp.width=blend;tmp.height=piece.height;const tx=tmp.getContext('2d');tx.drawImage(piece,Math.max(0,overlap-blend),0,blend,piece.height,0,0,blend,piece.height);tx.globalCompositeOperation='destination-in';const g=tx.createLinearGradient(0,0,blend,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.32,'rgba(0,0,0,.25)');g.addColorStop(.72,'rgba(0,0,0,.78)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,blend,piece.height);tx.globalCompositeOperation='source-over';ctx.drawImage(tmp,pos.x+overlap-blend,y);if(piece.width>overlap)ctx.drawImage(piece,overlap,0,piece.width-overlap,piece.height,pos.x+overlap,y,piece.width-overlap,piece.height);
     }else ctx.drawImage(piece,pos.x,y);
     await new Promise(r=>setTimeout(r,0));
   }
   return out;
 }
-async function labelCameraCaptureToCanvas(capture){
+async function labelCameraCaptureToCanvas(capture,options={}){
   const blob=capture?.blob||capture;if(!(blob instanceof Blob))throw new Error('Invalid panoramic capture');
   const bitmap=await createImageBitmap(blob);try{
-    let sx=0,sy=0,sw=bitmap.width,sh=bitmap.height;const n=capture?.cropNorm;
-    if(n){sx=clamp(Math.round(n.x*bitmap.width),0,bitmap.width-1);sy=clamp(Math.round(n.y*bitmap.height),0,bitmap.height-1);sw=clamp(Math.round(n.w*bitmap.width),1,bitmap.width-sx);sh=clamp(Math.round(n.h*bitmap.height),1,bitmap.height-sy);}
-    const maxEdge=3200,scale=Math.min(1,maxEdge/Math.max(sw,sh)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));c.getContext('2d').drawImage(bitmap,sx,sy,sw,sh,0,0,c.width,c.height);return c;
+    let ax=0,ay=0,aw=bitmap.width,ah=bitmap.height,coreRel={x:0,y:0,w:1,h:1};
+    if(capture?.assistNorm){
+      const n=capture.assistNorm;ax=clamp(Math.round(n.x*bitmap.width),0,bitmap.width-1);ay=clamp(Math.round(n.y*bitmap.height),0,bitmap.height-1);aw=clamp(Math.round(n.w*bitmap.width),1,bitmap.width-ax);ah=clamp(Math.round(n.h*bitmap.height),1,bitmap.height-ay);
+      const cn=capture.coreNorm||n;coreRel={x:clamp((cn.x-n.x)/n.w,0,1),y:clamp((cn.y-n.y)/n.h,0,1),w:clamp(cn.w/n.w,.001,1),h:clamp(cn.h/n.h,.001,1)};
+    }else if(capture?.coreWithinAssist){coreRel=capture.coreWithinAssist;}
+    const maxEdge=options.maxEdge||3200,scale=Math.min(1,maxEdge/Math.max(aw,ah)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(aw*scale));c.height=Math.max(1,Math.round(ah*scale));c.getContext('2d').drawImage(bitmap,ax,ay,aw,ah,0,0,c.width,c.height);
+    const coreRect={x:coreRel.x*c.width,y:coreRel.y*c.height,w:coreRel.w*c.width,h:coreRel.h*c.height};
+    if(options.mode==='core'){
+      const out=document.createElement('canvas');out.width=Math.max(1,Math.round(coreRect.w));out.height=Math.max(1,Math.round(coreRect.h));out.getContext('2d').drawImage(c,coreRect.x,coreRect.y,coreRect.w,coreRect.h,0,0,out.width,out.height);return options.withMeta?{canvas:out,coreRect:{x:0,y:0,w:out.width,h:out.height}}:out;
+    }
+    return options.withMeta?{canvas:c,coreRect}:c;
   }finally{bitmap.close?.();}
 }
 async function finalizeLabelCameraSession(){
@@ -2364,16 +2437,19 @@ async function finalizeLabelCameraSession(){
   }
   busy(true,'Finishing panoramic label…');
   try{
-    const pieces=[];
+    const pieces=[],metas=[];
     for(let i=0;i<captures.length;i++){
       $('busyText').textContent=`Preparing captured section · ${i+1}/${captures.length}`;
-      pieces.push(await labelCameraCaptureToCanvas(captures[i]));
+      const meta=await labelCameraCaptureToCanvas(captures[i],{withMeta:true,maxEdge:3200,mode:'assist'});metas.push(meta);pieces.push(meta.canvas);
       await new Promise(r=>setTimeout(r,0));
     }
-    $('busyText').textContent='Finishing the panoramic stitch…';
+    $('busyText').textContent='Morphing overlaps & blending seams…';
     const stitched=await stitchLabelPieces(pieces);
-    const ctx=stitched.getContext('2d',{willReadFrequently:true});
-    labelResultImage=ctx.getImageData(0,0,stitched.width,stitched.height);
+    const first=metas[0],last=metas[metas.length-1],trimLeft=Math.max(0,Math.round(first?.coreRect?.x||0)),trimRight=Math.max(0,Math.round((last?.canvas?.width||0)-((last?.coreRect?.x||0)+(last?.coreRect?.w||last?.canvas?.width||0))));
+    const cropX=Math.min(trimLeft,Math.max(0,stitched.width-1)),cropW=Math.max(1,stitched.width-cropX-Math.min(trimRight,Math.max(0,stitched.width-cropX-1)));
+    const out=document.createElement('canvas');out.width=cropW;out.height=stitched.height;out.getContext('2d').drawImage(stitched,cropX,0,cropW,stitched.height,0,0,cropW,stitched.height);
+    const ctx=out.getContext('2d',{willReadFrequently:true});
+    labelResultImage=ctx.getImageData(0,0,out.width,out.height);
     labelCameraCaptures=[];
     $('busyText').textContent='Opening final correction…';
     await new Promise(r=>setTimeout(r,20));
@@ -2587,4 +2663,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.17', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.18', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

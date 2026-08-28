@@ -315,7 +315,7 @@ body.pdf-mode .pdf-save{display:block}
 @media(max-width:430px){.label-camera-live-panel{top:60px;padding:8px 10px}#labelCameraPreviewCanvas{height:56px}}
 
 
-/* MeshDoctor v1.6.17 - lightweight live panorama */
+/* MeshDoctor v1.6.18 - lightweight live panorama */
 .label-camera-view{height:calc(100dvh - 176px)}
 .label-camera-live-panel{top:14px}
 .label-camera-controls{height:176px;display:flex;flex-direction:column;gap:8px;padding:8px 14px calc(10px + env(safe-area-inset-bottom));background:#05090f}
