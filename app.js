@@ -1754,13 +1754,14 @@ function defaultLabelCameraGuideState(){
     liveNewRatio:0,
     loopHint:false,
     ghostPreview:null,
+    liveGhostCanvas:null,
     ghostVersion:0,
     peakScore:0,
     previousScore:0,
     peakNewRatio:0,
     scoreDropFrames:0,
     guideLocked:false,
-    instruction:'Line the label up inside the guide, take the first narrow photo, then rotate slowly for overlap.'
+    instruction:'Frame one clear section, take the first shot, then rotate slowly. MeshDoctor will recognize the label and extend it as you move.'
   };
 }
 function syncLabelCameraMirror(){
@@ -1921,6 +1922,11 @@ function appendLabelCameraLivePixels(frame,est){
     ctx.drawImage(frame.canvas,overlapPx,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewEndX=dst+newPx;
   }
   s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;
+  // Panorama-style guidance: every frame that is confidently accepted becomes the new
+  // visual reference. This keeps the ghost tied to recognized/committed pixels instead
+  // of showing a fixed overlap zone inside the capture box.
+  const liveGhost=labelCameraLiveGhostPreview(direction==='left'?'left':'right');
+  if(liveGhost)s.ghostPreview=liveGhost;
   const usedW=(s.previewEndX||0)-(s.previewStartX||0);
   if(!s.loopHint&&s.previewFrameCount>=7&&usedW>frame.canvas.width*2.1&&sameLabelCameraFrameScore(s.firstPreviewFrame,frame)>.88)s.loopHint=true;
   renderLabelCameraPreviewUi();return true;
@@ -1934,13 +1940,13 @@ function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
   const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');if(first)first.classList.toggle('hidden',!!s.previewPanorama);if(!help)return;
   help.classList.remove('match-good','match-almost','match-loop');
-  if(!s.previewPanorama){help.textContent='Use the left pink › handle for width and the top pink › handle for height, take the first narrow photo, then rotate the item slowly. The live preview only paints new matching pixels; high-quality captures are saved separately.';return;}
+  if(!s.previewPanorama){help.textContent='Set the capture box around one clear section, take the first photo, then rotate slowly. MeshDoctor will recognize matching detail and extend the live label automatically.';return;}
   const pct=Math.round(s.alignScore*100);
   if(s.loopHint){help.textContent='Starting area detected again · the label loop looks complete. Tap Done when ready.';help.classList.add('match-loop');return;}
-  if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent=`Good overlap · ${pct}% match. Saving a high-quality keyframe in the background.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.72){help.textContent=`Good overlap · ${pct}% match. Keep rotating slowly.`;help.classList.add('match-good');return;}
-  if(s.alignScore>.60){help.textContent=`Almost aligned · ${pct}% match. Keep the label inside the frame and rotate slowly.`;help.classList.add('match-almost');return;}
-  help.textContent=`Looking for matching label pixels · ${pct}% match. Slow down or move back slightly.`;
+  if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent=`Tracking label · ${pct}% confidence. Saving a high-quality keyframe in the background.`;help.classList.add('match-good');return;}
+  if(s.alignScore>.72){help.textContent=`Tracking well · ${pct}% confidence. Keep rotating slowly.`;help.classList.add('match-good');return;}
+  if(s.alignScore>.60){help.textContent=`Almost aligned · ${pct}% confidence. Match the live label edge to the ghost and keep rotating slowly.`;help.classList.add('match-almost');return;}
+  help.textContent=`Looking for the label · ${pct}% confidence. Move back toward the ghosted edge and slow down.`;
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
@@ -1948,25 +1954,33 @@ function drawLabelCameraOverlay(){
   const b=labelCameraGuideLocalBounds();
   const left=rect.x+b.left*rect.w,right=rect.x+b.right*rect.w,top=rect.y+b.top*rect.h,bottom=rect.y+b.bottom*rect.h;
   const direction=s.previewDirection||'right',ghost=s.ghostPreview||s.prevStrip?.preview||null;
+
+  // The ghost is a continuation reference, not an overlap target. Keep it completely
+  // OUTSIDE the capture box and snap its leading edge directly against the box.
+  // Normal rightward panorama motion therefore shows the accepted label on the left,
+  // exactly like a panorama camera guide. Reverse motion is mirrored automatically.
   if(ghost){
-    const ghostW=Math.max(24*(window.devicePixelRatio||1),(right-left)*LABEL_CAMERA_GHOST_RATIO);
-    const gx=direction==='left'?right-ghostW:left,gy=top,gh=bottom-top;
+    const desiredGhostW=Math.max(24*(window.devicePixelRatio||1),(right-left)*LABEL_CAMERA_GHOST_RATIO);
+    const edgeGap=Math.max(1,canvas.width*.0015);
+    const available=direction==='left'?(canvas.width-right-edgeGap):(left-edgeGap);
+    const ghostW=Math.max(14,Math.min(desiredGhostW,Math.max(14,available)));
+    const gx=direction==='left'?right+edgeGap:left-edgeGap-ghostW,gy=top,gh=bottom-top;
     ctx.save();
-    ctx.beginPath();ctx.rect(gx,gy,ghostW,gh);ctx.clip();ctx.globalAlpha=.46;ctx.drawImage(ghost,gx,gy,ghostW,gh);ctx.restore();
-    ctx.save();ctx.strokeStyle='rgba(255,79,227,.84)';ctx.lineWidth=Math.max(1.5,canvas.width*.0014);ctx.setLineDash([7,6]);
-    const targetX=direction==='left'?gx:gx+ghostW;ctx.beginPath();ctx.moveTo(targetX,top);ctx.lineTo(targetX,bottom);ctx.stroke();ctx.restore();
-    ctx.save();ctx.font=`700 ${Math.max(11*(window.devicePixelRatio||1),canvas.width*.009)}px system-ui, sans-serif`;ctx.fillStyle='rgba(235,247,255,.92)';ctx.fillText('Align next section here',gx+8,top+22*(window.devicePixelRatio||1));ctx.restore();
+    ctx.beginPath();ctx.rect(gx,gy,ghostW,gh);ctx.clip();
+    ctx.globalAlpha=.48;
+    ctx.drawImage(ghost,gx,gy,ghostW,gh);
+    ctx.restore();
   }
+
+  // The capture box remains only as a framing guide for the NEW live section. There is
+  // intentionally no visible overlap strip, seam target, center line, or alignment text.
   ctx.save();
-  ctx.fillStyle='rgba(53,207,255,.035)';ctx.strokeStyle='rgba(83,225,255,.98)';ctx.lineWidth=Math.max(2,canvas.width*.0018);ctx.shadowColor='rgba(53,207,255,.42)';ctx.shadowBlur=8;
+  ctx.fillStyle='rgba(53,207,255,.028)';ctx.strokeStyle='rgba(83,225,255,.98)';ctx.lineWidth=Math.max(2,canvas.width*.0018);ctx.shadowColor='rgba(53,207,255,.38)';ctx.shadowBlur=7;
   ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.fill();ctx.stroke();ctx.restore();
-  ctx.save();ctx.strokeStyle='rgba(255,79,227,.72)';ctx.lineWidth=1.3;ctx.setLineDash([8,10]);const cx=(left+right)/2;ctx.beginPath();ctx.moveTo(cx,top);ctx.lineTo(cx,bottom);ctx.stroke();ctx.restore();
   if(!s.guideLocked){
     for(const h of getLabelCameraScaleHandles(canvas)){
       ctx.save();ctx.translate(h.x,h.y);ctx.rotate(h.angle);ctx.shadowColor='rgba(255,79,227,.92)';ctx.shadowBlur=Math.max(14,canvas.width*.012);ctx.fillStyle='#ff4fe3';ctx.font=`900 ${Math.max(32*(window.devicePixelRatio||1),canvas.width*.028)}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('›',0,-1);ctx.restore();
     }
-  }else{
-    ctx.save();ctx.font=`700 ${Math.max(10*(window.devicePixelRatio||1),canvas.width*.0085)}px system-ui, sans-serif`;ctx.fillStyle='rgba(159,231,255,.86)';ctx.textAlign='right';ctx.fillText('Capture area locked',right-6,top-10);ctx.restore();
   }
   updateLabelCameraUi();
 }
@@ -2014,12 +2028,13 @@ function labelCameraRectNorm(rect,video){
   };
 }
 function labelCameraLiveGhostPreview(side='right'){
-  const video=$('labelCameraVideo'),geom=labelCameraCaptureGeometry();if(!video?.videoWidth||!geom)return null;
+  const s=labelCameraGuideState,video=$('labelCameraVideo'),geom=labelCameraCaptureGeometry();if(!s||!video?.videoWidth||!geom)return null;
   const core=geom.core,ratio=LABEL_CAMERA_GHOST_RATIO;
   const sx=side==='left'?core.sx:core.sx+core.sw*(1-ratio),sw=Math.max(2,core.sw*ratio);
-  const out=document.createElement('canvas');
-  const targetH=240,scale=targetH/Math.max(1,core.sh);out.width=Math.max(64,Math.round(sw*scale));out.height=targetH;
-  out.getContext('2d').drawImage(video,sx,core.sy,sw,core.sh,0,0,out.width,out.height);
+  const targetH=240,scale=targetH/Math.max(1,core.sh),targetW=Math.max(64,Math.round(sw*scale));
+  let out=s.liveGhostCanvas;if(!out){out=document.createElement('canvas');s.liveGhostCanvas=out;}
+  if(out.width!==targetW||out.height!==targetH){out.width=targetW;out.height=targetH;}
+  const ctx=out.getContext('2d');ctx.clearRect(0,0,out.width,out.height);ctx.drawImage(video,sx,core.sy,sw,core.sh,0,0,out.width,out.height);
   return out;
 }
 async function labelCameraGhostFromCapture(capture,side='right'){
@@ -2174,7 +2189,7 @@ async function captureLabelCamera(fromAuto=false){
       }).catch(err=>console.warn('Could not build HQ ghost reference',err)),180);
       updateLabelCameraUi();drawLabelCameraOverlay();
     }
-    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved at the best overlap.`:`First HQ section captured. The capture area is now locked.`);
+    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved while tracking.`:`First HQ section captured. Rotate slowly and follow the ghosted edge.`);
   }finally{labelCameraWorking=false;updateLabelCameraUi();}
 }
 function defaultLabelMesh(){
@@ -2679,4 +2694,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.19', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.20', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

@@ -1,11 +1,11 @@
-# MeshDoctor v1.6.19
+# MeshDoctor v1.6.20
 
-## Camera latency pass
+## Panorama-style Label Maker guidance
 
-- The live Label Maker camera remains a lightweight 480×270 feed, but the full-screen overlay is now rendered at display resolution instead of phone pixel density.
-- Expensive backdrop-blur effects over the moving video have been removed in camera mode.
-- Live motion/overlap sensing now reuses tiny analysis canvases instead of allocating new large canvases every scan.
-- The progress panorama paints new pixels into a fixed lightweight working canvas instead of rebuilding/copying the entire panorama on every addition.
-- High-quality still capture is limited to a medium-resolution still target (up to about 1600 px wide when supported), which is still far sharper than the live preview but avoids requesting the phone's full sensor image for every keyframe.
-- Auto-capture keyframes are spaced farther apart so the camera pipeline is not repeatedly interrupted while the item is rotating.
-- High-quality ghost replacement is deferred slightly so the live video gets priority immediately after a capture.
+- The ghost/reference section is now rendered completely outside the capture box instead of covering the live capture area.
+- During the normal rightward sweep, the accepted label edge is snapped directly to the left side of the capture box so the user only has to continue the picture visually.
+- The visible overlap strip, dashed seam target, center alignment line, and “align here” text have been removed.
+- Recognized live frames continue filling the lightweight stitched preview as the item rotates, similar to a phone panorama workflow.
+- Every confidently accepted live frame can refresh the ghost reference, so the guide follows the growing panorama rather than remaining fixed on an old seam.
+- High-quality keyframes are still captured separately in the background for the final morph/blend stitch, preserving the low-latency camera path from v1.6.19.
+- User-facing guidance now talks about tracking/confidence rather than overlap percentages.
