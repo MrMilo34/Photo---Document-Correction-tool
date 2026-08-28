@@ -299,3 +299,5 @@ body.pdf-mode .pdf-save{display:block}
 .label-camera-view video{will-change:contents;transform:translateZ(0)}
 
 /* MeshDoctor v1.6.9: pink chevron resize handles are drawn on the camera overlay canvas; mesh dots are contour-only. */
+
+#labelRestoreBtn{margin-top:10px;}
