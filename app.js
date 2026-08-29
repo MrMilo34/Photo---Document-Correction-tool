@@ -1173,11 +1173,11 @@ function resetAdjustments(render=false){
   Object.keys(adjustments).forEach(k=>adjustments[k]=0);
   document.querySelectorAll('.mesh-slider').forEach(el=>setSliderValue(el,0,false));
   adjustedImage=null;
-  if(render&&currentMode==='adjust'&&correctedOriginal){correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);}
+  if(render&&currentMode==='adjust'&&correctedOriginal){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
 }
 async function runCorrection(){
   if(points.length<4)return;busy(true,'Correcting image…');await new Promise(r=>setTimeout(r,40));
-  try{correctedOriginal=makeCorrected();correctedImage=cleanupImage(correctedOriginal);aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);syncImageOutputName();setModeButtons();showView('result');}
+  try{correctedOriginal=makeCorrected();correctedImage=null;aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);syncImageOutputName();setModeButtons();showView('result');}
   catch(e){console.error(e);toast('Could not correct this shape. Try moving the perimeter points.');}
   finally{busy(false);}
 }
@@ -1188,9 +1188,9 @@ async function setMode(mode){
   if(mode==='bw'&&!grayscaleImageCache){busy(true,'Making grayscale image…');await new Promise(r=>setTimeout(r,30));}
   try{
     if(mode==='corrected'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(correctedImage);}
-    else if(mode==='adjust'){correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);}
-    else if(mode==='bw'){correctedImage ||= cleanupImage(correctedOriginal);grayscaleImageCache ||= grayscaleImage(correctedImage);displayImage(grayscaleImageCache);}
-    else if(mode==='assist'){correctedImage ||= cleanupImage(correctedOriginal);displayImage(aiAssistImage||correctedImage);}
+    else if(mode==='adjust'){adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);}
+    else if(mode==='bw'){grayscaleImageCache ||= grayscaleImage(correctedOriginal);displayImage(grayscaleImageCache);}
+    else if(mode==='assist'){displayImage(aiAssistImage||correctedOriginal);}
     setModeButtons();
   }finally{busy(false);}
 }
@@ -1254,8 +1254,9 @@ async function openAiAssist(){
   currentMode='assist';
   $('adjustPanel').classList.add('hidden');
   $('aiAssistPanel').classList.remove('hidden');
-  correctedImage ||= cleanupImage(correctedOriginal);
-  displayImage(aiAssistImage||correctedImage);
+  // AI Assisted starts from the untouched, geometry-corrected source. Local colour correction
+  // is reserved for the Corrected tab and must never leak into Adjust or AI source pixels.
+  displayImage(aiAssistImage||correctedOriginal);
   setModeButtons();
   checkAiService();
 }
@@ -1418,7 +1419,7 @@ function initMeshSliders(){
 }
 function scheduleAdjustmentRender(){
   clearTimeout(adjustTimer);
-  adjustTimer=setTimeout(()=>{if(currentMode!=='adjust'||!correctedOriginal)return;correctedImage ||= cleanupImage(correctedOriginal);adjustedImage=applyAdjustments(correctedImage);displayImage(adjustedImage);},55);
+  adjustTimer=setTimeout(()=>{if(currentMode!=='adjust'||!correctedOriginal)return;adjustedImage=applyAdjustments(correctedOriginal);displayImage(adjustedImage);},55);
 }
 
 function rotateSource(){
@@ -2097,6 +2098,15 @@ function labelCameraGuideQuadForCrop(crop){
     {x:bottom[0].x,y:bottom[0].y,corner:3}
   ];
 }
+function labelCameraCurrentPreviewLayout(){
+  const s=labelCameraGuideState;if(!s?.previewPanorama||!s.previewAnchor?.canvas)return null;
+  const frameWidth=Math.max(1,s.previewAnchor.canvas.width);
+  let start;
+  if(!s.previewDirection&&s.previewFrameCount<=1) start=Number(s.previewStartX)||0;
+  else if(s.previewDirection==='left') start=Number(s.previewStartX)||0;
+  else start=(Number(s.previewEndX)||frameWidth)-frameWidth;
+  return {start,end:start+frameWidth,frameWidth,direction:s.previewDirection||null};
+}
 function sampleLabelCameraStrip(side='left'){
   const s=labelCameraGuideState,video=$('labelCameraVideo'); if(!s||!video?.videoWidth)return null;
   const b=labelCameraGuideBoundsNormalized(),w=b.right-b.left,h=b.bottom-b.top;
@@ -2191,13 +2201,14 @@ async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return;const video=$('labelCameraVideo');if(!video?.videoWidth)return;
   const st=labelCameraGuideState;if(st&&!st.previewPanorama)seedLabelCameraPreviewFromLive();
   const geometry=labelCameraCaptureGeometry();if(!geometry)return;
+  const previewLayout=labelCameraCurrentPreviewLayout();
   labelCameraWorking=true;if(st){st.lastCaptureAt=performance.now();st.guideLocked=true;}
   const direction=st?.previewDirection||'right';
   if(st){st.ghostPreview=labelCameraLiveGhostPreview(direction==='left'?'left':'right')||st.ghostPreview;}
   updateLabelCameraUi();drawLabelCameraOverlay();
   try{
     const record=await captureLabelCameraHighResRecord(video,geometry);if(!record)return;
-    record.direction=direction;record.order=labelCameraSessionCount;
+    record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);
     if(labelCameraGuideState){
       labelCameraGuideState.previewAdvance=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;
@@ -2460,6 +2471,68 @@ async function stitchLabelPieces(pieces){
   }
   return out;
 }
+function medianNumber(values){
+  const a=(values||[]).filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return 0;
+  const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+async function stitchLabelCameraCapturesFromPreview(captures){
+  if(!captures?.length)throw new Error('No panoramic captures');
+  const entries=[];
+  for(let i=0;i<captures.length;i++){
+    const capture=captures[i],layout=capture?.previewLayout;
+    if(!layout||!Number.isFinite(layout.start)||!Number.isFinite(layout.frameWidth)||layout.frameWidth<=0)return null;
+    const piece=await labelCameraCaptureToCanvas(capture,{maxEdge:3200,mode:'core'});
+    entries.push({capture,piece,layout,index:i});
+    await new Promise(r=>setTimeout(r,0));
+  }
+  if(entries.length===1)return entries[0].piece;
+  entries.sort((a,b)=>a.layout.start-b.layout.start);
+
+  // The low-resolution live preview already solved the panorama movement successfully.
+  // Reuse those positions for the HQ keyframes instead of independently re-discovering
+  // each seam from scratch (which could render a row of separate photos).
+  const targetW=Math.max(64,Math.round(medianNumber(entries.map(e=>e.piece.width))||entries[0].piece.width));
+  const targetH=Math.max(64,Math.round(medianNumber(entries.map(e=>e.piece.height))||entries[0].piece.height));
+  const previewFrameW=medianNumber(entries.map(e=>e.layout.frameWidth))||entries[0].layout.frameWidth;
+  const pxPerPreview=targetW/Math.max(1,previewFrameW);
+  const minStart=Math.min(...entries.map(e=>e.layout.start));
+  const normalized=entries.map(e=>{
+    const c=document.createElement('canvas');c.width=targetW;c.height=targetH;
+    const cx=c.getContext('2d');cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';cx.drawImage(e.piece,0,0,targetW,targetH);
+    return {...e,piece:c,x:Math.round((e.layout.start-minStart)*pxPerPreview)};
+  });
+
+  // Never allow tiny preview timing errors to create a visible gap. The panorama should
+  // remain continuous and overlapping, just as it did in the live preview.
+  let coveredEnd=normalized[0].x+targetW;
+  for(let i=1;i<normalized.length;i++){
+    const minOverlap=Math.max(12,Math.round(targetW*.06));
+    if(normalized[i].x>coveredEnd-minOverlap)normalized[i].x=coveredEnd-minOverlap;
+    coveredEnd=Math.max(coveredEnd,normalized[i].x+targetW);
+  }
+  const out=document.createElement('canvas');out.width=Math.max(1,coveredEnd);out.height=targetH;
+  const ctx=out.getContext('2d');ctx.drawImage(normalized[0].piece,normalized[0].x,0);
+  coveredEnd=normalized[0].x+targetW;
+  for(let i=1;i<normalized.length;i++){
+    const e=normalized[i],overlap=Math.max(0,coveredEnd-e.x);
+    if(overlap<=0){ctx.drawImage(e.piece,e.x,0);coveredEnd=Math.max(coveredEnd,e.x+targetW);continue;}
+    const seamLocal=clamp(Math.round(overlap*.58),1,targetW-1);
+    const feather=Math.max(18,Math.min(Math.round(overlap*.42),Math.round(targetW*.18)));
+    const fadeStart=Math.max(0,seamLocal-Math.round(feather/2)),fadeEnd=Math.min(targetW,seamLocal+Math.round(feather/2));
+    const tmp=document.createElement('canvas');tmp.width=targetW;tmp.height=targetH;const tx=tmp.getContext('2d');tx.drawImage(e.piece,0,0);
+    tx.globalCompositeOperation='destination-in';
+    const g=tx.createLinearGradient(0,0,targetW,0);
+    g.addColorStop(0,'rgba(0,0,0,0)');
+    g.addColorStop(clamp(fadeStart/targetW,0,.999),'rgba(0,0,0,0)');
+    g.addColorStop(clamp(fadeEnd/targetW,.001,1),'rgba(0,0,0,1)');
+    g.addColorStop(1,'rgba(0,0,0,1)');
+    tx.fillStyle=g;tx.fillRect(0,0,targetW,targetH);tx.globalCompositeOperation='source-over';
+    ctx.drawImage(tmp,e.x,0);
+    coveredEnd=Math.max(coveredEnd,e.x+targetW);
+    await new Promise(r=>setTimeout(r,0));
+  }
+  return out;
+}
 async function labelCameraCaptureToCanvas(capture,options={}){
   const blob=capture?.blob||capture;if(!(blob instanceof Blob))throw new Error('Invalid panoramic capture');
   const bitmap=await createImageBitmap(blob);try{
@@ -2487,17 +2560,18 @@ async function finalizeLabelCameraSession(){
   }
   busy(true,'Finishing panoramic label…');
   try{
-    const pieces=[],metas=[];
-    for(let i=0;i<captures.length;i++){
-      $('busyText').textContent=`Preparing captured section · ${i+1}/${captures.length}`;
-      const meta=await labelCameraCaptureToCanvas(captures[i],{withMeta:true,maxEdge:3200,mode:'assist'});metas.push(meta);pieces.push(meta.canvas);
-      await new Promise(r=>setTimeout(r,0));
+    $('busyText').textContent='Building HQ panorama from live tracking…';
+    let out=await stitchLabelCameraCapturesFromPreview(captures);
+    if(!out){
+      const pieces=[];
+      for(let i=0;i<captures.length;i++){
+        $('busyText').textContent=`Preparing fallback section · ${i+1}/${captures.length}`;
+        pieces.push(await labelCameraCaptureToCanvas(captures[i],{maxEdge:3200,mode:'core'}));
+        await new Promise(r=>setTimeout(r,0));
+      }
+      $('busyText').textContent='Matching fallback overlaps & blending seams…';
+      out=await stitchLabelPieces(pieces);
     }
-    $('busyText').textContent='Morphing overlaps & blending seams…';
-    const stitched=await stitchLabelPieces(pieces);
-    const first=metas[0],last=metas[metas.length-1],trimLeft=Math.max(0,Math.round(first?.coreRect?.x||0)),trimRight=Math.max(0,Math.round((last?.canvas?.width||0)-((last?.coreRect?.x||0)+(last?.coreRect?.w||last?.canvas?.width||0))));
-    const cropX=Math.min(trimLeft,Math.max(0,stitched.width-1)),cropW=Math.max(1,stitched.width-cropX-Math.min(trimRight,Math.max(0,stitched.width-cropX-1)));
-    const out=document.createElement('canvas');out.width=cropW;out.height=stitched.height;out.getContext('2d').drawImage(stitched,cropX,0,cropW,stitched.height,0,0,cropW,stitched.height);
     const ctx=out.getContext('2d',{willReadFrequently:true});
     labelResultImage=ctx.getImageData(0,0,out.width,out.height);
     labelCameraCaptures=[];
@@ -2713,4 +2787,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.22', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.23', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
