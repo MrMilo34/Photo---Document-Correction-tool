@@ -1,4 +1,4 @@
-# MeshDoctor v1.6.23
+# MeshDoctor v1.6.24
 
 ## Panorama-style Label Maker guidance
 
@@ -11,8 +11,17 @@
 - User-facing guidance now talks about tracking/confidence rather than overlap percentages.
 
 
-## v1.6.23
+## v1.6.24
 - Adjust opens with original colour/levels after geometry correction only.
 - Corrected is the only local automatic colour/lighting cleanup tab.
 - Grayscale and AI Assisted start from the geometry-corrected source, not the Corrected result.
 - Label Maker HQ panorama now follows the successful live-preview positions when composing final keyframes.
+
+
+## v1.6.24 Auto Capture tracking repair
+- Restores the visible alignment percentage.
+- Alignment now represents progress toward the next automatic HQ keyframe.
+- Keeps tracking through very small/slow bottle rotations.
+- Uses brightness-normalized matching to tolerate reflections.
+- Keeps the ghost tied to the last committed capture instead of the current live frame.
+- Auto Capture now fires from accumulated recognized new pixels instead of waiting for a fragile confidence-score peak.
