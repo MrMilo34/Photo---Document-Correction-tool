@@ -315,7 +315,7 @@ body.pdf-mode .pdf-save{display:block}
 @media(max-width:430px){.label-camera-live-panel{top:60px;padding:8px 10px}#labelCameraPreviewCanvas{height:56px}}
 
 
-/* MeshDoctor v1.6.24 - panorama-style live guidance */
+/* MeshDoctor v1.6.25 - panorama-style live guidance */
 .label-camera-view{height:calc(100dvh - 176px)}
 .label-camera-live-panel{top:14px}
 .label-camera-controls{height:176px;display:flex;flex-direction:column;gap:8px;padding:8px 14px calc(10px + env(safe-area-inset-bottom));background:#05090f}
@@ -329,7 +329,7 @@ body.pdf-mode .pdf-save{display:block}
 @media(max-width:430px){.label-camera-controls{height:170px;padding-left:10px;padding-right:10px}.label-camera-control-row{gap:8px}.label-camera-controls .label-camera-toolbar{gap:5px}.label-camera-live-panel{top:12px}}
 
 
-/* v1.6.24 keeps the v1.6.19 latency pass: avoid expensive video backdrop compositing */
+/* v1.6.25 keeps the v1.6.19 latency pass: avoid expensive video backdrop compositing */
 .label-camera-dialog::backdrop{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 .label-camera-live-panel,.label-camera-instruction,.label-camera-first-shot,.label-camera-chip,.label-camera-align-status{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 .label-camera-live-panel,.label-camera-instruction,.label-camera-first-shot{background:rgba(4,10,17,.88)!important}
@@ -340,7 +340,7 @@ body.pdf-mode .pdf-save{display:block}
 
 
 
-/* v1.6.24: compact alignment progress is visible; large image instructions remain gone */
+/* v1.6.25: compact alignment progress is visible; large image instructions remain gone */
 .label-camera-first-shot{display:none!important}
 .label-camera-instruction{display:flex!important;position:absolute;left:14px;right:14px;bottom:12px;padding:8px 11px;border-radius:14px;z-index:5;background:rgba(4,10,17,.88)!important;border:1px solid rgba(87,217,255,.18);flex-direction:column;gap:2px;pointer-events:none}
 .label-camera-instruction strong{font-size:11px}

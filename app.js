@@ -1756,6 +1756,10 @@ function defaultLabelCameraGuideState(){
     lastPreviewAt:0,
     liveNewRatio:0,
     loopHint:false,
+    loopCandidateFrames:0,
+    trackingLostFrames:0,
+    directionCandidate:null,
+    directionVotes:0,
     ghostPreview:null,
     liveGhostCanvas:null,
     ghostVersion:0,
@@ -1869,52 +1873,73 @@ function renderLabelCameraPreviewUi(){
 }
 function labelCameraLowResFrame(){
   const s=labelCameraGuideState,video=$('labelCameraVideo'),crop=labelCameraSourceCrop(0,0);if(!s||!video?.videoWidth||!crop)return null;
-  const maxW=96,maxH=56,scale=Math.min(maxW/crop.sw,maxH/crop.sh),w=Math.max(36,Math.round(crop.sw*scale)),h=Math.max(24,Math.round(crop.sh*scale));
+  const sourceAspect=clamp(crop.sw/Math.max(1,crop.sh),.10,3.5);
+  // Keep the visual preview lightweight, but give the recognizer MORE horizontal
+  // samples when the user chooses a narrow strip. A fixed 48-column tracker was
+  // throwing away too much sideways detail on bottles/cans.
+  const maxW=108,maxH=92,scale=Math.min(maxW/crop.sw,maxH/crop.sh),w=Math.max(34,Math.round(crop.sw*scale)),h=Math.max(28,Math.round(crop.sh*scale));
   let canvas=s.motionCanvas;if(!canvas){canvas=document.createElement('canvas');s.motionCanvas=canvas;}if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
   canvas.getContext('2d',{alpha:false}).drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,w,h);
-  const gw=48,gh=Math.max(18,Math.round(h*(gw/w)));let g=s.motionGrayCanvas;if(!g){g=document.createElement('canvas');s.motionGrayCanvas=g;}if(g.width!==gw||g.height!==gh){g.width=gw;g.height=gh;}
-  const gx=g.getContext('2d',{willReadFrequently:true,alpha:false});gx.drawImage(canvas,0,0,gw,gh);
-  const rgba=gx.getImageData(0,0,gw,gh).data,gray=new Uint8Array(gw*gh);for(let i=0,j=0;i<rgba.length;i+=4,j++)gray[j]=Math.round(.2126*rgba[i]+.7152*rgba[i+1]+.0722*rgba[i+2]);
+
+  const narrow=sourceAspect<.68;
+  const gw=narrow?72:64;
+  const gh=clamp(Math.round(gw/sourceAspect),narrow?54:28,narrow?112:78);
+  let g=s.motionGrayCanvas;if(!g){g=document.createElement('canvas');s.motionGrayCanvas=g;}if(g.width!==gw||g.height!==gh){g.width=gw;g.height=gh;}
+  const gx=g.getContext('2d',{willReadFrequently:true,alpha:false});
+  // Sample directly from the camera source instead of upscaling the tiny preview.
+  gx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,gw,gh);
+  const rgba=gx.getImageData(0,0,gw,gh).data,gray=new Uint8Array(gw*gh),edge=new Uint8Array(gw*gh);
+  for(let i=0,j=0;i<rgba.length;i+=4,j++)gray[j]=Math.round(.2126*rgba[i]+.7152*rgba[i+1]+.0722*rgba[i+2]);
+  let edgeSum=0,edgeCount=0;
+  for(let y=1;y<gh-1;y++)for(let x=1;x<gw-1;x++){
+    const i=y*gw+x,dx=Math.abs(gray[i+1]-gray[i-1]),dy=Math.abs(gray[i+gw]-gray[i-gw]);
+    const e=Math.min(255,Math.round(dx*.78+dy*.22));edge[i]=e;edgeSum+=e;edgeCount++;
+  }
   const preview=document.createElement('canvas');preview.width=w;preview.height=h;preview.getContext('2d').drawImage(canvas,0,0);
-  return {canvas:preview,w,h,gw,gh,gray};
+  return {canvas:preview,w,h,gw,gh,gray,edge,texture:edgeCount?edgeSum/(edgeCount*255):0,aspect:sourceAspect,narrow};
 }
 function labelCameraOverlapScore(a,b,ow,dy,direction){
-  const top=2,bottom=Math.min(a.gh,b.gh)-2;
+  const padY=Math.max(2,Math.floor(Math.min(a.gh,b.gh)*.04)),bottom=Math.min(a.gh,b.gh)-padY;
+  const stepY=(a.narrow||b.narrow)?2:3,stepX=2;
   let sumA=0,sumB=0,count=0;
-  const samples=[];
-  for(let y=top;y<bottom;y+=2){
-    const by=y+dy;if(by<top||by>=bottom)continue;
-    const aStart=direction==='right'?a.gw-ow:0,bStart=direction==='right'?0:b.gw-ow;
-    for(let x=0;x<ow;x+=2){
-      const av=a.gray[y*a.gw+aStart+x],bv=b.gray[by*b.gw+bStart+x];
-      sumA+=av;sumB+=bv;count++;samples.push([av,bv]);
+  const aStart=direction==='right'?a.gw-ow:0,bStart=direction==='right'?0:b.gw-ow;
+  for(let y=padY;y<bottom;y+=stepY){
+    const by=y+dy;if(by<padY||by>=bottom)continue;
+    for(let x=0;x<ow;x+=stepX){const ai=y*a.gw+aStart+x,bi=by*b.gw+bStart+x;sumA+=a.gray[ai];sumB+=b.gray[bi];count++;}
+  }
+  if(count<12)return 0;
+  const meanA=sumA/count,meanB=sumB/count;
+  let rawDiff=0,normDiff=0,edgeDiff=0,edgeEnergy=0;
+  for(let y=padY;y<bottom;y+=stepY){
+    const by=y+dy;if(by<padY||by>=bottom)continue;
+    for(let x=0;x<ow;x+=stepX){
+      const ai=y*a.gw+aStart+x,bi=by*b.gw+bStart+x,av=a.gray[ai],bv=b.gray[bi],ae=a.edge?.[ai]||0,be=b.edge?.[bi]||0;
+      rawDiff+=Math.abs(av-bv);normDiff+=Math.min(255,Math.abs((av-meanA)-(bv-meanB)));edgeDiff+=Math.abs(ae-be);edgeEnergy+=(ae+be)*.5;
     }
   }
-  if(!count)return 0;
-  const meanA=sumA/count,meanB=sumB/count;
-  let rawDiff=0,normDiff=0;
-  for(const [av,bv] of samples){
-    rawDiff+=Math.abs(av-bv);
-    normDiff+=Math.min(255,Math.abs((av-meanA)-(bv-meanB)));
-  }
-  // Reflections/exposure can change while a bottle rotates. Weight contrast-normalized
-  // structure more heavily than absolute brightness so the same printed label stays locked.
-  const diff=(rawDiff*.30)+(normDiff*.70);
-  return clamp(1-diff/(count*255),0,1);
+  // Printed edges/text survive exposure changes and reflections much better than raw
+  // brightness. This weighting is especially important for narrow cylindrical labels.
+  const diff=rawDiff*.10+normDiff*.42+edgeDiff*.48;
+  let score=clamp(1-diff/(count*255),0,1);
+  const energy=edgeEnergy/(count*255);
+  if(energy<.018)score*=.90; // blank/glare-only regions should not look like strong matches
+  return score;
 }
 function estimateLabelCameraMotion(a,b,lockedDirection=null){
   if(!a||!b||a.gw!==b.gw||a.gh!==b.gh)return null;
   const dirs=lockedDirection?[lockedDirection]:['right','left'];
-  // Include tiny movements (up to 99% overlap) so the tracker does not lose the
-  // previous frame while the user rotates very slowly. Also allow more travel before
-  // abandoning a match on curved labels.
-  const maxOw=Math.max(10,Math.floor(a.gw*.99)),minOw=Math.max(8,Math.floor(a.gw*.42));
+  const aspect=Math.min(a.aspect||1,b.aspect||1);
+  // A narrow selection can move by most of its own width between camera samples.
+  // Search much smaller overlaps instead of assuming at least 42% remains visible.
+  const minFrac=aspect<.42?.16:aspect<.68?.22:aspect<.95?.30:.38;
+  const maxOw=Math.max(12,Math.floor(a.gw*.985)),minOw=Math.max(10,Math.floor(a.gw*minFrac));
+  const dyMax=Math.max(3,Math.min(8,Math.round(a.gh*.065))),owStep=aspect<.68?2:3;
   let best=null;
   for(const direction of dirs){
-    for(let ow=maxOw;ow>=minOw;ow-=2){
+    for(let ow=maxOw;ow>=minOw;ow-=owStep){
       const fraction=ow/a.gw;
-      for(let dy=-3;dy<=3;dy++){
-        const score=labelCameraOverlapScore(a,b,ow,dy,direction),weighted=score-(1-fraction)*.020;
+      for(let dy=-dyMax;dy<=dyMax;dy+=2){
+        const score=labelCameraOverlapScore(a,b,ow,dy,direction),weighted=score-(1-fraction)*(aspect<.68?.008:.016);
         if(!best||weighted>best.weighted)best={direction,overlap:ow,dy,score,weighted,newRatio:1-fraction};
       }
     }
@@ -1928,19 +1953,26 @@ function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.loopHint=false;renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.loopCandidateFrames=0;s.loopHint=false;renderLabelCameraPreviewUi();return frame;
 }
 function appendLabelCameraLivePixels(frame,est){
   const s=labelCameraGuideState;if(!s||!frame||!est)return false;
-  const locked=!!s.previewDirection;
-  const minScore=locked?.56:.58;
-  const minTravel=locked?.025:.04;
+  const locked=!!s.previewDirection,narrow=!!frame.narrow;
+  const minScore=locked?(narrow?.49:.54):(narrow?.515:.56),minTravel=narrow?.012:.020;
   if(est.score<minScore||est.newRatio<minTravel)return false;
-  if(!s.previewDirection&&est.newRatio>=.065)s.previewDirection=est.direction;
+
+  // Do not permanently lock sweep direction from one ambiguous narrow-frame result.
+  if(!s.previewDirection&&est.newRatio>=.045){
+    if(s.directionCandidate===est.direction)s.directionVotes=(s.directionVotes||0)+1;
+    else{s.directionCandidate=est.direction;s.directionVotes=1;}
+    if(s.directionVotes>=2)s.previewDirection=est.direction;
+  }
   if(s.previewDirection&&est.direction!==s.previewDirection)return false;
+  if(!s.previewDirection&&s.directionCandidate&&est.direction!==s.directionCandidate)return false;
+
   const pano=s.previewPanorama;if(!pano)return false;
-  const overlapPx=clamp(Math.round((est.overlap/frame.gw)*frame.canvas.width),1,frame.canvas.width-1),newPx=frame.canvas.width-overlapPx;if(newPx<2)return false;
-  const ctx=pano.getContext('2d',{alpha:false}),direction=s.previewDirection||est.direction;
+  const overlapPx=clamp(Math.round((est.overlap/frame.gw)*frame.canvas.width),1,frame.canvas.width-1),newPx=frame.canvas.width-overlapPx;if(newPx<1)return false;
+  const ctx=pano.getContext('2d',{alpha:false}),direction=s.previewDirection||s.directionCandidate||est.direction;
   if(direction==='left'){
     const dst=Math.round((s.previewStartX||0)-newPx);if(dst<4)return false;
     ctx.drawImage(frame.canvas,0,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewStartX=dst;
@@ -1948,22 +1980,27 @@ function appendLabelCameraLivePixels(frame,est){
     const dst=Math.round(s.previewEndX||0);if(dst+newPx>=pano.width-4)return false;
     ctx.drawImage(frame.canvas,overlapPx,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewEndX=dst+newPx;
   }
-  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;
-  // IMPORTANT: do not replace the ghost with the current live frame. The ghost is the
-  // last committed HQ capture, so the user always has a stable previous-image reference.
-  const usedW=(s.previewEndX||0)-(s.previewStartX||0);
-  if(!s.loopHint&&s.previewFrameCount>=7&&usedW>frame.canvas.width*2.1&&sameLabelCameraFrameScore(s.firstPreviewFrame,frame)>.86)s.loopHint=true;
+  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;
+  const usedW=(s.previewEndX||0)-(s.previewStartX||0),loopScore=sameLabelCameraFrameScore(s.firstPreviewFrame,frame);
+  const enoughSweep=s.previewFrameCount>=18&&usedW>frame.canvas.width*(narrow?4.2:3.5)&&labelCameraSessionCount>=4;
+  if(enoughSweep&&loopScore>.92)s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
+  else s.loopCandidateFrames=Math.max(0,(s.loopCandidateFrames||0)-1);
+  if(!s.loopHint&&s.loopCandidateFrames>=3)s.loopHint=true;
   renderLabelCameraPreviewUi();return true;
 }
 function advanceLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s?.previewPanorama||!s.previewAnchor)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const est=estimateLabelCameraMotion(s.previewAnchor,frame,s.previewDirection);if(!est)return null;
   s.trackingScore=est.score;s.liveNewRatio=est.newRatio;
-  const appended=appendLabelCameraLivePixels(frame,est);
-  // If the object barely moved, refresh the tracking anchor without painting duplicate
-  // pixels. This prevents a slow rotation from leaving the matcher stuck on an old frame.
-  if(!appended&&est.score>=.60&&est.newRatio<.04)s.previewAnchor=frame;
-  return {...est,appended,frameWidth:frame.canvas.width,frame};
+  const appended=appendLabelCameraLivePixels(frame,est),reliable=est.score>=(frame.narrow?.50:.55);
+  if(!appended&&reliable&&est.newRatio<.035){s.previewAnchor=frame;s.trackingLostFrames=0;}
+  else if(!appended&&!reliable){
+    s.trackingLostFrames=(s.trackingLostFrames||0)+1;
+    // Recover instead of remaining stuck forever on an old reference after glare or a
+    // fast narrow-strip jump. We intentionally do not paint the uncertain gap.
+    if(s.trackingLostFrames>=3&&frame.texture>.018){s.previewAnchor=frame;s.trackingLostFrames=0;}
+  }else if(appended)s.trackingLostFrames=0;
+  return {...est,appended,frameWidth:frame.canvas.width,frameAspect:frame.aspect,narrow:frame.narrow,frame};
 }
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
@@ -2134,21 +2171,21 @@ function sampleLabelCameraStrip(side='left'){
 function compareLumaSamples(a,b){if(!a||!b||a.w!==b.w||a.h!==b.h)return 0;let diff=0;for(let i=0;i<a.data.length;i++)diff+=Math.abs(a.data[i]-b.data[i]);return clamp(1-(diff/(a.data.length*255)),0,1);}
 function tickLabelCamera(now=performance.now()){
   const st=labelCameraGuideState;
-  if(st?.previewPanorama&&now-st.lastPreviewAt>=190){
-    st.lastPreviewAt=now;const motion=advanceLabelCameraPreviewFromLive();
-    if(motion){
-      const captureDistance=Math.max(10,motion.frameWidth*.14);
-      st.captureProgress=clamp(st.previewAdvance/captureDistance,0,1);
-      st.alignScore=st.captureProgress;
-      // Each accepted live addition is already a successful previous-frame match.
-      // Once enough genuinely new label pixels have accumulated, take the next HQ
-      // keyframe immediately instead of waiting for a fragile score peak.
-      const ready=motion.appended&&st.previewAdvance>=captureDistance&&motion.score>=.56;
-      if(st.auto&&ready&&now-st.lastCaptureAt>1200&&!labelCameraWorking){
-        st.captureProgress=1;updateLabelCameraUi();
-        captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
+  if(st?.previewPanorama){
+    const aspect=st.previewAnchor?.aspect||1,interval=aspect<.50?90:aspect<.72?115:150;
+    if(now-st.lastPreviewAt>=interval){
+      st.lastPreviewAt=now;const motion=advanceLabelCameraPreviewFromLive();
+      if(motion){
+        const narrow=motion.narrow||motion.frameAspect<.68;
+        const captureDistance=Math.max(narrow?5:8,motion.frameWidth*(narrow?.095:.135));
+        st.captureProgress=clamp(st.previewAdvance/captureDistance,0,1);st.alignScore=st.captureProgress;
+        const readyScore=narrow?.50:.54;
+        const ready=motion.appended&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
+        if(st.auto&&ready&&now-st.lastCaptureAt>1050&&!labelCameraWorking){
+          st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
+        }
+        st.previousScore=motion.score;updateLabelCameraUi();
       }
-      st.previousScore=motion.score;updateLabelCameraUi();
     }
   }
   labelCameraRaf=requestAnimationFrame(tickLabelCamera);
@@ -2801,4 +2838,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.24', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.25', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
