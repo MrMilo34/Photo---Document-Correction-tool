@@ -1,4 +1,4 @@
-# MeshDoctor v1.6.21
+# MeshDoctor v1.6.22
 
 ## Panorama-style Label Maker guidance
 

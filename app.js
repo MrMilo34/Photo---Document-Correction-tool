@@ -1940,7 +1940,32 @@ function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
   const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');
   if(first){first.classList.add('hidden');first.textContent='';}
-  if(help){help.textContent='';const wrap=help.closest?.('.label-camera-instruction');if(wrap)wrap.classList.add('hidden');}
+  if(!help)return;
+  const wrap=help.closest?.('.label-camera-instruction');if(wrap)wrap.classList.remove('hidden');
+  help.classList.remove('match-good','match-almost','match-loop');
+  if(!s.previewPanorama){help.textContent='Alignment 0%';return;}
+  const pct=Math.round(s.alignScore*100);
+  if(s.loopHint){
+    help.textContent=`Alignment ${pct}% · Loop detected`;
+    help.classList.add('match-loop');
+    return;
+  }
+  if(labelCameraWorking&&labelCameraSessionCount>0){
+    help.textContent=`Alignment ${pct}% · Capturing`;
+    help.classList.add('match-good');
+    return;
+  }
+  if(s.alignScore>.72){
+    help.textContent=`Alignment ${pct}% · Ready`;
+    help.classList.add('match-good');
+    return;
+  }
+  if(s.alignScore>.60){
+    help.textContent=`Alignment ${pct}%`;
+    help.classList.add('match-almost');
+    return;
+  }
+  help.textContent=`Alignment ${pct}%`;
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
@@ -2688,4 +2713,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.21', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.22', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
