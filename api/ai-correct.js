@@ -20,6 +20,17 @@ function promptFor(mode, hasReference=false){
     'Repair visual defects using the source image, surrounding context, and any optional reference image. When parts are obscured by glare, reflections, or washout, make a conservative best-effort reconstruction of the same original content rather than inventing unrelated new content.'
   ];
   const reference = hasReference ? 'A second user-supplied reference image of the same subject or page from another angle is provided. Use it only to recover missing or glare-covered detail while keeping the final result matched to the primary image composition.' : '';
+  if(mode === 'label'){
+    return common.concat([reference,
+      'Restore this flattened or photographed product label / packaging panel for faithful archival or catalog use.',
+      'This image may contain packaging artwork, printed logos, bilingual text, ingredients, instructions, warnings, barcodes, codes, measurements, and other product-label details.',
+      'Reduce glare, reflections, shadows, haze, fading, stains, blur, noise, compression artifacts, stitching marks, and uneven lighting when possible.',
+      'Preserve the exact printed content, wording, spelling, numbers, punctuation, spacing, line breaks, panel shapes, logo shapes, barcode structure, icons, and overall layout.',
+      'Keep flat printed fills clean and uniform. Preserve original colors faithfully while making whites neutral and the label easier to read.',
+      'Do not hallucinate, rewrite, translate, re-typeset, or redesign packaging text. If a tiny printed region is genuinely unreadable, keep it soft or minimally repaired rather than inventing new wording.',
+      'Return a cleaner, more legible version of the same label or packaging panel.'
+    ]).join(' ');
+  }
   if(mode === 'document'){
     return common.concat([reference,
       'Restore this photographed, scanned, or digital document/page for readability, archival, educational, or professional use.',
@@ -112,7 +123,7 @@ function makeEditForm(decoded,resolvedMode,size,{minimal=false,referenceDecoded=
   form.append('prompt',promptFor(resolvedMode, Boolean(referenceDecoded)));
   form.append('quality',QUALITY);
   if(!minimal){
-    const outputFormat=resolvedMode==='document'?'png':'jpeg';
+    const outputFormat=(resolvedMode==='document'||resolvedMode==='label')?'png':'jpeg';
     form.append('size',size);
     form.append('output_format',outputFormat);
     form.append('n','1');
@@ -178,9 +189,9 @@ export default async function handler(req, res){
     const referenceDecoded = referenceImage ? decodeDataUrl(referenceImage) : null;
     if(referenceImage && !referenceDecoded) return res.status(400).json({ error: 'Unsupported reference image data URL' });
 
-    const resolvedMode = mode === 'document' ? 'document' : 'photo';
+    const resolvedMode = mode === 'label' ? 'label' : (mode === 'document' ? 'document' : 'photo');
     const size = outputSize(width, height);
-    let outputFormat = resolvedMode === 'document' ? 'png' : 'jpeg';
+    let outputFormat = (resolvedMode === 'document' || resolvedMode === 'label') ? 'png' : 'jpeg';
     let retriedMinimal=false;
 
     let {response:aiResponse,data,requestId}=await callImageEdit(makeEditForm(decoded,resolvedMode,size,{referenceDecoded}));
