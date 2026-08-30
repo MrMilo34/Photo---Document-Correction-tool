@@ -1758,6 +1758,9 @@ function defaultLabelCameraGuideState(){
     loopHint:false,
     loopCandidateFrames:0,
     trackingLostFrames:0,
+    stationaryFrames:0,
+    lastCaptureReferenceFrame:null,
+    lastAcceptedMotionAt:0,
     directionCandidate:null,
     directionVotes:0,
     ghostPreview:null,
@@ -1949,15 +1952,32 @@ function estimateLabelCameraMotion(a,b,lockedDirection=null){
 function sameLabelCameraFrameScore(a,b){
   if(!a||!b||a.gw!==b.gw||a.gh!==b.gh)return 0;let diff=0;for(let i=0;i<a.gray.length;i+=3)diff+=Math.abs(a.gray[i]-b.gray[i]);return 1-diff/(Math.ceil(a.gray.length/3)*255);
 }
+function labelCameraFrameIdentityScore(a,b){
+  if(!a||!b||a.gw!==b.gw||a.gh!==b.gh)return 0;
+  // Full-frame, exposure-tolerant comparison. This is deliberately separate from the
+  // overlap matcher: a stationary label can produce a mathematically valid tiny
+  // 'new strip' because of sensor noise, autofocus breathing or reflections.
+  const edgeScore=labelCameraOverlapScore(a,b,Math.min(a.gw,b.gw),0,'right');
+  const rawScore=sameLabelCameraFrameScore(a,b);
+  return clamp(edgeScore*.72+rawScore*.28,0,1);
+}
 function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.loopCandidateFrames=0;s.loopHint=false;renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopHint=false;renderLabelCameraPreviewUi();return frame;
 }
 function appendLabelCameraLivePixels(frame,est){
   const s=labelCameraGuideState;if(!s||!frame||!est)return false;
   const locked=!!s.previewDirection,narrow=!!frame.narrow;
+  const identity=labelCameraFrameIdentityScore(s.previewAnchor,frame);
+  const staticCutoff=narrow?.965:.972;
+  // v1.6.26: a nearly identical frame is NOT motion. Do not paint it into the
+  // panorama and, critically, do not let 1-2 px of camera noise accumulate toward
+  // another automatic HQ photograph. Keep the anchor fixed so genuine slow rotation
+  // eventually moves far enough away from it to be accepted.
+  if(identity>=staticCutoff){s.stationaryFrames=(s.stationaryFrames||0)+1;s.liveNewRatio=0;return false;}
+  s.stationaryFrames=0;
   const minScore=locked?(narrow?.49:.54):(narrow?.515:.56),minTravel=narrow?.012:.020;
   if(est.score<minScore||est.newRatio<minTravel)return false;
 
@@ -1980,7 +2000,7 @@ function appendLabelCameraLivePixels(frame,est){
     const dst=Math.round(s.previewEndX||0);if(dst+newPx>=pano.width-4)return false;
     ctx.drawImage(frame.canvas,overlapPx,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewEndX=dst+newPx;
   }
-  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;
+  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();
   const usedW=(s.previewEndX||0)-(s.previewStartX||0),loopScore=sameLabelCameraFrameScore(s.firstPreviewFrame,frame);
   const enoughSweep=s.previewFrameCount>=18&&usedW>frame.canvas.width*(narrow?4.2:3.5)&&labelCameraSessionCount>=4;
   if(enoughSweep&&loopScore>.92)s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
@@ -1993,7 +2013,8 @@ function advanceLabelCameraPreviewFromLive(){
   const est=estimateLabelCameraMotion(s.previewAnchor,frame,s.previewDirection);if(!est)return null;
   s.trackingScore=est.score;s.liveNewRatio=est.newRatio;
   const appended=appendLabelCameraLivePixels(frame,est),reliable=est.score>=(frame.narrow?.50:.55);
-  if(!appended&&reliable&&est.newRatio<.035){s.previewAnchor=frame;s.trackingLostFrames=0;}
+  const identity=labelCameraFrameIdentityScore(s.previewAnchor,frame);
+  if(!appended&&reliable&&est.newRatio<.035&&identity<(frame.narrow?.965:.972)){s.previewAnchor=frame;s.trackingLostFrames=0;}
   else if(!appended&&!reliable){
     s.trackingLostFrames=(s.trackingLostFrames||0)+1;
     // Recover instead of remaining stuck forever on an old reference after glare or a
@@ -2180,7 +2201,10 @@ function tickLabelCamera(now=performance.now()){
         const captureDistance=Math.max(narrow?5:8,motion.frameWidth*(narrow?.095:.135));
         st.captureProgress=clamp(st.previewAdvance/captureDistance,0,1);st.alignScore=st.captureProgress;
         const readyScore=narrow?.50:.54;
-        const ready=motion.appended&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
+        const referenceIdentity=st.lastCaptureReferenceFrame?labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,motion.frame):0;
+        const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.955:.962);
+        const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<500);
+        const ready=recentRealMotion&&changedEnough&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
         if(st.auto&&ready&&now-st.lastCaptureAt>1050&&!labelCameraWorking){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
@@ -2251,6 +2275,16 @@ function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCamera
 async function captureLabelCamera(fromAuto=false){
   if(labelCameraWorking)return;const video=$('labelCameraVideo');if(!video?.videoWidth)return;
   const st=labelCameraGuideState;if(st&&!st.previewPanorama)seedLabelCameraPreviewFromLive();
+  const trackingFrame=st?.previewPanorama?labelCameraLowResFrame():null;
+  // Final duplicate guard. Even if the motion estimator is fooled by reflections or
+  // autofocus noise, Auto Capture may not save another HQ frame of the same view.
+  if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
+    const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
+    const cutoff=trackingFrame.narrow?.955:.962;
+    if(identity>=cutoff){
+      st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.stationaryFrames=(st.stationaryFrames||0)+1;updateLabelCameraUi();return;
+    }
+  }
   const geometry=labelCameraCaptureGeometry();if(!geometry)return;
   const previewLayout=labelCameraCurrentPreviewLayout();
   labelCameraWorking=true;if(st){st.lastCaptureAt=performance.now();st.guideLocked=true;}
@@ -2262,7 +2296,8 @@ async function captureLabelCamera(fromAuto=false){
     record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();
     if(labelCameraGuideState){
-      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.captureProgress=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;
+      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.captureProgress=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;labelCameraGuideState.stationaryFrames=0;
+      labelCameraGuideState.lastCaptureReferenceFrame=trackingFrame||labelCameraLowResFrame()||labelCameraGuideState.previewAnchor;
       const strip=sampleLabelCameraStrip(direction==='left'?'left':'right');if(strip)labelCameraGuideState.prevStrip=strip;
       const ghostVersion=++labelCameraGuideState.ghostVersion;
       setTimeout(()=>labelCameraGhostFromCapture(record,direction==='left'?'left':'right').then(ghost=>{
@@ -2838,4 +2873,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.25', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.26', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
