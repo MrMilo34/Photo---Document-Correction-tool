@@ -1771,6 +1771,7 @@ function defaultLabelCameraGuideState(){
     peakNewRatio:0,
     scoreDropFrames:0,
     liveAddsSinceCapture:0,
+    captureArmedAt:0,
     guideLocked:false,
     instruction:'Frame one clear section, take the first shot, then rotate slowly. MeshDoctor will recognize the label and extend it as you move.'
   };
@@ -2006,14 +2007,14 @@ function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopHint=false;s.liveAddsSinceCapture=0;renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopHint=false;s.liveAddsSinceCapture=0;s.captureArmedAt=0;renderLabelCameraPreviewUi();return frame;
 }
 function appendLabelCameraLivePixels(frame,est){
   const s=labelCameraGuideState;if(!s||!frame||!est)return false;
   const locked=!!s.previewDirection,narrow=!!frame.narrow;
   const identity=labelCameraFrameIdentityScore(s.previewAnchor,frame);
   const staticCutoff=narrow?.982:.976;
-  // v1.6.29: a nearly identical frame is NOT motion. Do not paint it into the
+  // v1.6.30: a nearly identical frame is NOT motion. Do not paint it into the
   // panorama and, critically, do not let 1-2 px of camera noise accumulate toward
   // another automatic HQ photograph. Keep the anchor fixed so genuine slow rotation
   // eventually moves far enough away from it to be accepted.
@@ -2241,20 +2242,24 @@ function tickLabelCamera(now=performance.now()){
         const narrow=motion.narrow||motion.frameAspect<.68;
         const captureDistance=Math.max(narrow?9:8,motion.frameWidth*(narrow?.185:.145));
         const distanceProgress=clamp(st.previewAdvance/captureDistance,0,1);
-        const readyScore=narrow?.55:.55;
         const referenceIdentity=st.lastCaptureReferenceFrame?labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,motion.frame):0;
         const centralNovelty=st.lastCaptureReferenceFrame?clamp(1-referenceIdentity,0,1):1;
         const noveltyTarget=narrow?.105:.080;
         const noveltyProgress=clamp(centralNovelty/noveltyTarget,0,1);
-        // Alignment now means: how close are we to a real capture decision? Both actual
+        // Alignment means: how close are we to a real HQ keyframe decision? Both actual
         // panorama travel and genuinely new CENTRAL label content must be present.
         st.captureProgress=Math.min(distanceProgress,noveltyProgress);st.alignScore=st.captureProgress;
         const changedEnough=!st.lastCaptureReferenceFrame||centralNovelty>=noveltyTarget;
-        const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
-        const ready=!st.loopHint&&recentRealMotion&&changedEnough&&enoughAdds&&distanceProgress>=1&&motion.score>=readyScore;
+        // If the live panorama accepted this frame, its matcher already passed the
+        // recognition threshold. Do not make HQ capture pass a second stricter score gate.
+        // Arm the keyframe briefly so if the threshold is reached during cooldown, a
+        // stable frame can still be captured a moment later instead of remaining at 100%.
+        if(!st.loopHint&&motion.appended&&changedEnough&&enoughAdds&&distanceProgress>=1)st.captureArmedAt=now;
+        const armed=!!st.captureArmedAt&&(now-st.captureArmedAt)<1100;
+        const ready=!st.loopHint&&changedEnough&&enoughAdds&&distanceProgress>=1&&(motion.appended||armed);
         if(st.auto&&ready&&now-st.lastCaptureAt>(narrow?1650:1200)&&!labelCameraWorking){
-          st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
+          st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.captureArmedAt=0;st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
         st.previousScore=motion.score;updateLabelCameraUi();
       }
@@ -2326,12 +2331,12 @@ async function captureLabelCamera(fromAuto=false){
   const trackingFrame=st?.previewPanorama?labelCameraLowResFrame():null;
   // Final duplicate guard. Even if the motion estimator is fooled by reflections or
   // autofocus noise, Auto Capture may not save another HQ frame of the same view.
-  if(fromAuto&&st?.loopHint){st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;updateLabelCameraUi();return;}
+  if(fromAuto&&st?.loopHint){st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.captureArmedAt=0;updateLabelCameraUi();return;}
   if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
     const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
     const centralNovelty=clamp(1-identity,0,1),noveltyTarget=trackingFrame.narrow?.105:.080;
     if(centralNovelty<noveltyTarget){
-      st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.liveAddsSinceCapture=0;st.stationaryFrames=(st.stationaryFrames||0)+1;updateLabelCameraUi();return;
+      st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.liveAddsSinceCapture=0;st.captureArmedAt=0;st.stationaryFrames=(st.stationaryFrames||0)+1;updateLabelCameraUi();return;
     }
   }
   const geometry=labelCameraCaptureGeometry();if(!geometry)return;
@@ -2345,7 +2350,7 @@ async function captureLabelCamera(fromAuto=false){
     record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();
     if(labelCameraGuideState){
-      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.captureProgress=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;labelCameraGuideState.stationaryFrames=0;labelCameraGuideState.liveAddsSinceCapture=0;
+      labelCameraGuideState.previewAdvance=0;labelCameraGuideState.captureProgress=0;labelCameraGuideState.lastCaptureAt=performance.now();labelCameraGuideState.peakScore=0;labelCameraGuideState.scoreDropFrames=0;labelCameraGuideState.stationaryFrames=0;labelCameraGuideState.liveAddsSinceCapture=0;labelCameraGuideState.captureArmedAt=0;
       labelCameraGuideState.lastCaptureReferenceFrame=trackingFrame||labelCameraLowResFrame()||labelCameraGuideState.previewAnchor;
       const strip=sampleLabelCameraStrip(direction==='left'?'left':'right');if(strip)labelCameraGuideState.prevStrip=strip;
       const ghostVersion=++labelCameraGuideState.ghostVersion;
@@ -2953,4 +2958,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.29', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.30', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
