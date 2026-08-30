@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.6.27" />
-  <link rel="icon" href="icons/icon-192.png?v=1.6.27" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.27" />
-  <link rel="stylesheet" href="styles.css?v=1.6.27" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.28" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.28" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.28" />
+  <link rel="stylesheet" href="styles.css?v=1.6.28" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.6.27" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.28" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.6.27</div>
+      <div class="version-tag">release v1.6.28</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -283,11 +283,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.6.27</h2>
+    <h2>MeshDoctor v1.6.28</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.27:</strong> adds duplicate-frame rejection to Label Maker. Stationary or nearly identical camera frames no longer accumulate false panorama movement or trigger Auto Capture; a new HQ keyframe requires verified visual change from the last saved view.</p>
+    <p><strong>v1.6.28:</strong> adds duplicate-frame rejection to Label Maker. Stationary or nearly identical camera frames no longer accumulate false panorama movement or trigger Auto Capture; a new HQ keyframe requires verified visual change from the last saved view.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -360,8 +360,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.6.27"></script>
+  <script src="config.js?v=1.6.28"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.6.27"></script>
+  <script src="app.js?v=1.6.28"></script>
 </body>
 </html>

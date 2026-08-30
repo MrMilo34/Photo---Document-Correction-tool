@@ -1,4 +1,4 @@
-# MeshDoctor v1.6.27
+# MeshDoctor v1.6.28
 
 Label Maker now rejects stationary/duplicate frames before they can extend the panorama or trigger an automatic HQ capture. Auto Capture requires real visual change from the previous saved keyframe.
 
@@ -13,14 +13,14 @@ Label Maker now rejects stationary/duplicate frames before they can extend the p
 - User-facing guidance now talks about tracking/confidence rather than overlap percentages.
 
 
-## v1.6.27
+## v1.6.28
 - Adjust opens with original colour/levels after geometry correction only.
 - Corrected is the only local automatic colour/lighting cleanup tab.
 - Grayscale and AI Assisted start from the geometry-corrected source, not the Corrected result.
 - Label Maker HQ panorama now follows the successful live-preview positions when composing final keyframes.
 
 
-## v1.6.27 Auto Capture tracking repair
+## v1.6.28 Auto Capture tracking repair
 - Restores the visible alignment percentage.
 - Alignment now represents progress toward the next automatic HQ keyframe.
 - Keeps tracking through very small/slow bottle rotations.
@@ -29,7 +29,7 @@ Label Maker now rejects stationary/duplicate frames before they can extend the p
 - Auto Capture now fires from accumulated recognized new pixels instead of waiting for a fragile confidence-score peak.
 
 
-## v1.6.27 Adaptive recognition
+## v1.6.28 Adaptive recognition
 - Narrow capture boxes now use a denser horizontal tracking grid instead of throwing away lateral detail.
 - Narrow selections are sampled more frequently and can match with much smaller remaining overlap, preventing the tracker from getting stuck when a slim label moves quickly through the box.
 - Matching now emphasizes printed edges/text structure over raw brightness to tolerate glare and exposure changes on cylindrical packaging.

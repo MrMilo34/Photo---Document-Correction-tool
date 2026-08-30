@@ -1346,7 +1346,7 @@ async function runAiRestoreChoice(choice){
     busy(true,'Preparing tiled AI label polish…');await new Promise(r=>setTimeout(r,20));
     try{
       const state=await checkAiService();
-      if(state==='ready'){aiAssistImage=await gptRestorePanoramaTiled(correctedOriginal,'document');$('aiChoiceStatus').textContent='Wide label restored in overlapping AI sections and blended back together.';}
+      if(state==='ready'){aiAssistImage=await gptRestorePanoramaTiled(correctedOriginal,labelEditorMode?'label':'document');$('aiChoiceStatus').textContent='Wide label restored in overlapping AI sections and blended back together.';}
       else{aiAssistImage=aggressiveCleanupImage(correctedOriginal);$('aiChoiceStatus').textContent='AI unavailable. Local Document fallback used.';}
       displayImage(aiAssistImage);currentMode='assist';setModeButtons();
     }catch(err){console.error(err);aiAssistImage=aggressiveCleanupImage(correctedOriginal);displayImage(aiAssistImage);currentMode='assist';setModeButtons();setAiEngineStatus('fallback','Wide-label AI polish failed · local restoration used');$('aiChoiceStatus').textContent='Local Document fallback used.';}
@@ -1358,7 +1358,7 @@ async function runAiRestoreChoice(choice){
     const state=await checkAiService();
     if(state==='ready'){
       try{
-        aiAssistImage=await gptRestoreImage(correctedOriginal,resolved);
+        aiAssistImage=await gptRestoreImage(correctedOriginal,labelEditorMode&&resolved==='document'?'label':resolved);
         $('aiChoiceStatus').textContent=`AI ${resolved === 'document' ? 'Document' : 'Photo'} restore complete.`;
       }catch(err){
         console.warn('AI restore unavailable, using local fallback',err);
@@ -1973,7 +1973,7 @@ function appendLabelCameraLivePixels(frame,est){
   const locked=!!s.previewDirection,narrow=!!frame.narrow;
   const identity=labelCameraFrameIdentityScore(s.previewAnchor,frame);
   const staticCutoff=narrow?.982:.976;
-  // v1.6.27: a nearly identical frame is NOT motion. Do not paint it into the
+  // v1.6.28: a nearly identical frame is NOT motion. Do not paint it into the
   // panorama and, critically, do not let 1-2 px of camera noise accumulate toward
   // another automatic HQ photograph. Keep the anchor fixed so genuine slow rotation
   // eventually moves far enough away from it to be accepted.
@@ -2206,7 +2206,7 @@ function tickLabelCamera(now=performance.now()){
         const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.920:.955);
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
-        const ready=recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
+        const ready=!st.loopHint&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
         if(st.auto&&ready&&now-st.lastCaptureAt>(narrow?1650:1200)&&!labelCameraWorking){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
@@ -2280,6 +2280,7 @@ async function captureLabelCamera(fromAuto=false){
   const trackingFrame=st?.previewPanorama?labelCameraLowResFrame():null;
   // Final duplicate guard. Even if the motion estimator is fooled by reflections or
   // autofocus noise, Auto Capture may not save another HQ frame of the same view.
+  if(fromAuto&&st?.loopHint){st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;updateLabelCameraUi();return;}
   if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
     const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
     const cutoff=trackingFrame.narrow?.928:.958;
@@ -2563,6 +2564,33 @@ function medianNumber(values){
   const a=(values||[]).filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return 0;
   const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;
 }
+function labelSeamCutColumn(leftRegion,rightPiece,overlap){
+  const w=Math.max(1,Math.min(overlap,leftRegion?.width||0,rightPiece?.width||0)),h=Math.max(1,Math.min(leftRegion?.height||0,rightPiece?.height||0));
+  if(w<8||h<24)return Math.max(1,Math.round(w*.58));
+  const lc=leftRegion.getContext('2d',{willReadFrequently:true}),rc=rightPiece.getContext('2d',{willReadFrequently:true});
+  const ld=lc.getImageData(0,0,w,h).data,rd=rc.getImageData(0,0,w,h).data;
+  const lg=new Uint8Array(w*h),rg=new Uint8Array(w*h);
+  for(let i=0,j=0;i<ld.length;i+=4,j++){
+    lg[j]=Math.round(.299*ld[i]+.587*ld[i+1]+.114*ld[i+2]);
+    rg[j]=Math.round(.299*rd[i]+.587*rd[i+1]+.114*rd[i+2]);
+  }
+  let bestX=Math.max(1,Math.round(w*.58)),bestCost=1e9;
+  const x0=Math.max(1,Math.round(w*.18)),x1=Math.min(w-2,Math.round(w*.88));
+  for(let x=x0;x<=x1;x++){
+    let diff=0,edge=0,count=0;
+    for(let y=2;y<h-2;y+=2){
+      const i=y*w+x,gl=lg[i],gr=rg[i];
+      diff+=Math.abs(gl-gr);
+      edge+=Math.abs(lg[i+1]-lg[i-1])+Math.abs(rg[i+1]-rg[i-1]);
+      count++;
+    }
+    if(!count)continue;
+    const diffN=diff/(count*255),edgeN=edge/(count*255*2),centerBias=Math.abs((x/w)-.58);
+    const cost=diffN*.74+edgeN*.20+centerBias*.06;
+    if(cost<bestCost){bestCost=cost;bestX=x;}
+  }
+  return bestX;
+}
 async function stitchLabelCameraCapturesFromPreview(captures){
   if(!captures?.length)throw new Error('No panoramic captures');
   const entries=[];
@@ -2604,9 +2632,13 @@ async function stitchLabelCameraCapturesFromPreview(captures){
   for(let i=1;i<normalized.length;i++){
     const e=normalized[i],overlap=Math.max(0,coveredEnd-e.x);
     if(overlap<=0){ctx.drawImage(e.piece,e.x,0);coveredEnd=Math.max(coveredEnd,e.x+targetW);continue;}
-    const seamLocal=clamp(Math.round(overlap*.58),1,targetW-1);
-    const feather=Math.max(18,Math.min(Math.round(overlap*.42),Math.round(targetW*.18)));
-    const fadeStart=Math.max(0,seamLocal-Math.round(feather/2)),fadeEnd=Math.min(targetW,seamLocal+Math.round(feather/2));
+    const leftRegion=document.createElement('canvas');leftRegion.width=overlap;leftRegion.height=targetH;
+    leftRegion.getContext('2d').drawImage(out,e.x,0,overlap,targetH,0,0,overlap,targetH);
+    const overlapPiece=document.createElement('canvas');overlapPiece.width=overlap;overlapPiece.height=targetH;
+    overlapPiece.getContext('2d').drawImage(e.piece,0,0,overlap,targetH,0,0,overlap,targetH);
+    const seamLocal=clamp(labelSeamCutColumn(leftRegion,overlapPiece,overlap),1,targetW-1);
+    const feather=Math.max(8,Math.min(20,Math.round(overlap*.18)));
+    const fadeStart=Math.max(0,seamLocal-feather),fadeEnd=Math.min(targetW,seamLocal+feather);
     const tmp=document.createElement('canvas');tmp.width=targetW;tmp.height=targetH;const tx=tmp.getContext('2d');tx.drawImage(e.piece,0,0);
     tx.globalCompositeOperation='destination-in';
     const g=tx.createLinearGradient(0,0,targetW,0);
@@ -2689,7 +2721,7 @@ async function buildLabelResult(){
   finally{busy(false);}
 }
 async function aiPolishLabelResult(){
-  if(!labelResultImage)return;const ratio=Math.max(labelResultImage.width/labelResultImage.height,labelResultImage.height/labelResultImage.width);if(ratio>3){toast('This label is wider than the current AI whole-image limit. Local polish has been kept.');return;}busy(true,'AI polishing label…');const oldRef=aiReferenceDataUrl,oldName=aiReferenceName;aiReferenceDataUrl='';aiReferenceName='';try{const state=await checkAiService(true);if(state!=='ready')throw new Error('AI service unavailable');labelResultImage=await gptRestoreImage(labelResultImage,'document');const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='AI label polish complete.';}catch(err){console.error(err);$('labelResultStatus').className='ai-engine-status fallback';$('labelResultStatus').querySelector('span').textContent='AI polish was unavailable. The locally polished stitched label is still ready to save.';}finally{aiReferenceDataUrl=oldRef;aiReferenceName=oldName;busy(false);}
+  if(!labelResultImage)return;const ratio=Math.max(labelResultImage.width/labelResultImage.height,labelResultImage.height/labelResultImage.width);if(ratio>3){toast('This label is wider than the current AI whole-image limit. Local polish has been kept.');return;}busy(true,'AI polishing label…');const oldRef=aiReferenceDataUrl,oldName=aiReferenceName;aiReferenceDataUrl='';aiReferenceName='';try{const state=await checkAiService(true);if(state!=='ready')throw new Error('AI service unavailable');labelResultImage=await gptRestoreImage(labelResultImage,'label');const c=$('labelResultCanvas');c.width=labelResultImage.width;c.height=labelResultImage.height;c.getContext('2d').putImageData(labelResultImage,0,0);$('labelResultStatus').className='ai-engine-status ready';$('labelResultStatus').querySelector('span').textContent='AI label polish complete.';}catch(err){console.error(err);$('labelResultStatus').className='ai-engine-status fallback';$('labelResultStatus').querySelector('span').textContent='AI polish was unavailable. The locally polished stitched label is still ready to save.';}finally{aiReferenceDataUrl=oldRef;aiReferenceName=oldName;busy(false);}
 }
 function promptFileName({title='Name your file',help='Choose the name used when this file is saved.',defaultName='MeshDoctor-file',extension='.png'}={}){
   const dlg=$('fileNameDialog');if(!dlg)return Promise.resolve(sanitizeFileName(defaultName,'MeshDoctor-file'));$('fileNameTitle').textContent=title;$('fileNameHelp').textContent=help;$('fileNameInput').value=sanitizeFileName(defaultName,'MeshDoctor-file');$('fileNameExtension').textContent=extension;if(!dlg.open)dlg.showModal();setTimeout(()=>$('fileNameInput')?.select(),40);return new Promise(resolve=>{fileNameResolve=resolve;});
@@ -2875,4 +2907,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.27', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.28', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
