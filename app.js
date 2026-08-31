@@ -72,7 +72,7 @@ const LABEL_CAMERA_ASSIST_X = .18;
 const LABEL_CAMERA_ASSIST_Y = .025;
 const LABEL_CAMERA_GHOST_RATIO = .24;
 const LABEL_CAMERA_GHOST_INSET = .045;
-const LABEL_CAMERA_LAST_HQ_PREVIEW_H = 76;
+const LABEL_CAMERA_PASS_BINS = 36;
 
 
 let points = [];
@@ -1773,8 +1773,22 @@ function defaultLabelCameraGuideState(){
     ghostPreview:null,
     liveGhostCanvas:null,
     ghostVersion:0,
-    lastHqDisplay:null,
-    lastHqGhostSide:'right',
+    scanPass:1,
+    pass1Complete:false,
+    pass2Complete:false,
+    passTransitionUntil:0,
+    pass1Map:null,
+    pass1MapWidth:0,
+    pass1MapHeight:0,
+    pass1PreviewStart:0,
+    pass1PreviewEnd:0,
+    pass2StartReference:null,
+    pass2Travel:0,
+    pass2MapX:0,
+    pass2MapScore:0,
+    pass2MapConfidence:0,
+    pass2MatchedX:0,
+    hqCoverageBins:new Array(LABEL_CAMERA_PASS_BINS).fill(0),
     peakScore:0,
     previousScore:0,
     peakNewRatio:0,
@@ -1784,7 +1798,7 @@ function defaultLabelCameraGuideState(){
     rejectedMotionFrames:0,
     motionStepHistory:[],
     guideLocked:false,
-    instruction:'Take the first shot, then rotate slowly. MeshDoctor now prefers a narrower central tracking area and can force an HQ capture if the live scan has clearly advanced.'
+    instruction:'Pass 1 maps the full label. Keep rotating after the first loop for Pass 2 detail capture and HQ gap filling.'
   };
 }
 function syncLabelCameraMirror(){
@@ -1874,39 +1888,6 @@ function clearLabelCameraPreviewUi(){
   ctx.font='400 18px system-ui, sans-serif';ctx.fillStyle='rgba(159,176,191,.92)';ctx.fillText('Capture once, then rotate the item slowly.',c.width/2,c.height/2+24);
 }
 
-function labelCameraPreviewThumbCanvas(source,maxW=144,maxH=LABEL_CAMERA_LAST_HQ_PREVIEW_H){
-  if(!source?.width||!source?.height)return null;
-  const scale=Math.min(maxW/Math.max(1,source.width),maxH/Math.max(1,source.height),1);
-  const out=document.createElement('canvas');
-  out.width=Math.max(1,Math.round(source.width*scale));
-  out.height=Math.max(1,Math.round(source.height*scale));
-  const ctx=out.getContext('2d');
-  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-  ctx.drawImage(source,0,0,out.width,out.height);
-  return out;
-}
-function renderLabelCameraLastHqDisplay(){
-  const panel=$('labelCameraFirstShot'),s=labelCameraGuideState;
-  if(!panel)return;
-  if(!s?.lastHqDisplay){panel.classList.add('hidden');panel.innerHTML='';return;}
-  panel.innerHTML='';
-  const heading=document.createElement('div');
-  heading.className='label-camera-last-hq-head';
-  heading.textContent='Last HQ capture';
-  const body=document.createElement('div');
-  body.className='label-camera-last-hq-body';
-  const thumb=labelCameraPreviewThumbCanvas(s.lastHqDisplay,160,LABEL_CAMERA_LAST_HQ_PREVIEW_H);
-  if(thumb){thumb.className='label-camera-last-hq-thumb';body.appendChild(thumb);}
-  const copy=document.createElement('div');
-  copy.className='label-camera-last-hq-copy';
-  const directionText=(s.previewDirection||s.lastHqGhostSide||'right')==='left'?'right':'left';
-  copy.innerHTML=`<strong>Ghost anchor:</strong> next section lines up against the ${directionText} side of this saved capture.`;
-  body.appendChild(copy);
-  panel.appendChild(heading);
-  panel.appendChild(body);
-  panel.classList.remove('hidden');
-}
-
 function renderLabelCameraPreviewUi(){
   const c=$('labelCameraPreviewCanvas'),meta=$('labelCameraPreviewMeta'),s=labelCameraGuideState;
   if(meta) meta.textContent=`${s?.previewFrameCount||0} live addition${(s?.previewFrameCount||0)===1?'':'s'} · ${labelCameraSessionCount} HQ capture${labelCameraSessionCount===1?'':'s'}`;
@@ -1920,7 +1901,6 @@ function renderLabelCameraPreviewUi(){
   const dw=Math.max(1,Math.round(sw*scale)),dh=Math.max(1,Math.round(pano.height*scale)),dx=pad,dy=Math.round((c.height-dh)/2);
   ctx.strokeStyle='rgba(87,217,255,.16)';ctx.lineWidth=2;ctx.strokeRect(dx-1,dy-1,dw+2,dh+2);ctx.drawImage(pano,sx,0,sw,pano.height,dx,dy,dw,dh);
   ctx.fillStyle='rgba(53,207,255,.18)';ctx.fillRect(pad,c.height-7,availW,3);ctx.fillStyle='rgba(53,207,255,.92)';ctx.fillRect(pad,c.height-7,Math.max(24,Math.min(availW,dw)),3);
-  renderLabelCameraLastHqDisplay();
 }
 function labelCameraLowResFrame(){
   const s=labelCameraGuideState,video=$('labelCameraVideo'),crop=labelCameraSourceCrop(0,0);if(!s||!video?.videoWidth||!crop)return null;
@@ -2071,7 +2051,80 @@ function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];s.scanPass=1;s.pass1Complete=false;s.pass2Complete=false;s.passTransitionUntil=0;s.pass1Map=null;s.pass1MapWidth=0;s.pass1MapHeight=0;s.pass1PreviewStart=0;s.pass1PreviewEnd=0;s.pass2StartReference=null;s.pass2Travel=0;s.pass2MapX=0;s.pass2MapScore=0;s.pass2MapConfidence=0;s.pass2MatchedX=0;s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);renderLabelCameraPreviewUi();return frame;
+}
+
+function labelCameraSnapshotActivePreview(){
+  const s=labelCameraGuideState;if(!s?.previewPanorama)return null;
+  const sx=Math.max(0,Math.floor(s.previewStartX||0)),ex=Math.min(s.previewPanorama.width,Math.ceil(s.previewEndX||s.previewPanorama.width));
+  const sw=Math.max(1,ex-sx),out=document.createElement('canvas');out.width=sw;out.height=s.previewPanorama.height;
+  out.getContext('2d',{alpha:false}).drawImage(s.previewPanorama,sx,0,sw,s.previewPanorama.height,0,0,sw,s.previewPanorama.height);
+  return {canvas:out,start:sx,end:ex,width:sw,height:out.height};
+}
+function labelCameraNormalizePass1Layouts(snapshot){
+  if(!snapshot)return;
+  for(const cap of labelCameraCaptures){
+    if((cap.capturePass||1)!==1)continue;
+    const l=cap.previewLayout;if(!l||!Number.isFinite(l.start))continue;
+    cap.mapLayout={start:l.start-snapshot.start,end:l.end-snapshot.start,frameWidth:l.frameWidth,direction:l.direction||cap.direction||null,pass:1};
+  }
+}
+function labelCameraMarkCoverage(layout,weight=1){
+  const s=labelCameraGuideState;if(!s?.pass1MapWidth||!layout||!Number.isFinite(layout.start))return;
+  const bins=s.hqCoverageBins||(s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0));
+  const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
+  const center=Number(layout.start)+frameW/2,radius=frameW*.48;
+  for(let i=0;i<bins.length;i++){
+    const x=(i+.5)/bins.length*s.pass1MapWidth,dist=Math.abs(x-center),score=dist<=radius?weight*(1-dist/Math.max(1,radius)):.0;
+    bins[i]=Math.max(bins[i]||0,score);
+  }
+}
+function labelCameraRebuildCoverage(){
+  const s=labelCameraGuideState;if(!s)return;
+  s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);
+  for(const cap of labelCameraCaptures){const layout=cap.mapLayout;if(layout)labelCameraMarkCoverage(layout,(cap.capturePass||1)===2?1:.86);}
+}
+function labelCameraHqCoverageRatio(){
+  const bins=labelCameraGuideState?.hqCoverageBins||[];if(!bins.length)return 0;
+  return bins.reduce((sum,v)=>sum+(v>=.42?1:clamp(v/.42,0,1)),0)/bins.length;
+}
+function labelCameraCoverageNeedAt(x,frameW){
+  const s=labelCameraGuideState,bins=s?.hqCoverageBins;if(!s?.pass1MapWidth||!bins?.length)return true;
+  const center=clamp(Number(x)+Math.max(1,frameW)/2,0,s.pass1MapWidth-1),idx=clamp(Math.floor(center/s.pass1MapWidth*bins.length),0,bins.length-1);
+  const lo=Math.max(0,idx-1),hi=Math.min(bins.length-1,idx+1);let best=0;
+  for(let i=lo;i<=hi;i++)best=Math.max(best,bins[i]||0);
+  return best<.62;
+}
+function labelCameraMapCandidateFrame(map,x,frame){
+  if(!map||!frame?.canvas?.width||!frame?.canvas?.height)return null;
+  const w=Math.min(frame.canvas.width,map.width),sx=clamp(Math.round(x),0,Math.max(0,map.width-w));
+  const c=document.createElement('canvas');c.width=frame.canvas.width;c.height=frame.canvas.height;
+  c.getContext('2d',{alpha:false}).drawImage(map,sx,0,w,map.height,0,0,c.width,c.height);
+  return labelCameraTrackingFrameFromCanvas(c,frame);
+}
+function labelCameraMatchPass1Map(frame){
+  const s=labelCameraGuideState,map=s?.pass1Map;if(!s||!map||!frame)return null;
+  const frameW=Math.max(1,frame.canvas.width),expected=clamp(s.pass2Travel||0,0,Math.max(0,map.width-frameW));
+  const span=Math.max(frameW*.70,map.width*.055),step=Math.max(4,frameW*.18);let best={score:-1,x:expected};
+  for(let dx=-span;dx<=span;dx+=step){const x=clamp(expected+dx,0,Math.max(0,map.width-frameW)),cand=labelCameraMapCandidateFrame(map,x,frame);if(!cand)continue;const score=labelCameraFrameIdentityScore(cand,frame);if(score>best.score)best={score,x};}
+  const corr=clamp((best.score-.25)/.65,0,1);s.pass2MapScore=best.score;s.pass2MapConfidence=corr;s.pass2MatchedX=best.x;
+  s.pass2MapX=clamp(best.x,0,Math.max(0,map.width-frameW));return best;
+}
+function beginLabelCameraSecondPass(frame,direction){
+  const s=labelCameraGuideState;if(!s||s.scanPass!==1)return false;
+  const snapshot=labelCameraSnapshotActivePreview();if(!snapshot)return false;
+  s.pass1Map=snapshot.canvas;s.pass1MapWidth=snapshot.width;s.pass1MapHeight=snapshot.height;s.pass1PreviewStart=snapshot.start;s.pass1PreviewEnd=snapshot.end;s.pass1Complete=true;
+  labelCameraNormalizePass1Layouts(snapshot);labelCameraRebuildCoverage();
+  const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
+  const startX=520;ctx.drawImage(frame.canvas,startX,0);s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.previewFrameCount=1;s.previewAdvance=0;
+  s.scanPass=2;s.pass2StartReference=frame;s.pass2Travel=0;s.pass2MapX=0;s.pass2MatchedX=0;s.pass2MapScore=1;s.pass2MapConfidence=1;s.pass2Complete=false;s.loopHint=false;s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.liveAddsSinceCapture=0;s.motionStepHistory=[];s.captureProgress=0;s.alignScore=0;s.passTransitionUntil=performance.now()+1800;
+  renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Loop detected · Pass 1 mapped. Continue rotating for Pass 2 detail capture.');return true;
+}
+function labelCameraCurrentGlobalLayout(){
+  const s=labelCameraGuideState,local=labelCameraCurrentPreviewLayout();if(!s||!local)return null;
+  if((s.scanPass||1)===1||!s.pass1Complete)return {...local,pass:1};
+  const frameW=Math.max(1,local.frameWidth||s.previewAnchor?.canvas?.width||1),start=clamp(Number(s.pass2MapX)||Number(s.pass2Travel)||0,0,Math.max(0,(s.pass1MapWidth||frameW)-frameW));
+  return {start,end:start+frameW,frameWidth:frameW,direction:local.direction||s.previewDirection||null,pass:2,mapScore:s.pass2MapScore||0};
 }
 function appendLabelCameraLivePixels(frame,est){
   const s=labelCameraGuideState;if(!s||!frame||!est)return false;
@@ -2115,8 +2168,11 @@ function appendLabelCameraLivePixels(frame,est){
   // preview. The previous broad similarity metric could miss the true first return and
   // later false-trigger on another black/white panel. A shift-tolerant correlation
   // recognizes the same physical print even when the bottle returns a little left/right.
-  const usedBefore=(s.previewEndX||0)-(s.previewStartX||0),loopReference=s.firstHqReferenceFrame||s.firstPreviewFrame;
-  const enoughSweep=s.previewFrameCount>=15&&usedBefore>frame.canvas.width*(narrow?1.85:2.05)&&labelCameraSessionCount>=5;
+  const usedBefore=(s.previewEndX||0)-(s.previewStartX||0);
+  const loopReference=(s.scanPass||1)===2?(s.pass2StartReference||s.firstHqReferenceFrame||s.firstPreviewFrame):(s.firstHqReferenceFrame||s.firstPreviewFrame);
+  const passTravel=(s.scanPass||1)===2?(s.pass2Travel||usedBefore):usedBefore;
+  const requiredSweep=(s.scanPass||1)===2?Math.max(frame.canvas.width*1.8,(s.pass1MapWidth||0)*.72):frame.canvas.width*(narrow?1.85:2.05);
+  const enoughSweep=s.previewFrameCount>=15&&passTravel>requiredSweep&&labelCameraSessionCount>=1;
   const loopCorrelation=enoughSweep?labelCameraShiftCorrelation(loopReference,frame):-1;
   s.loopCorrelation=loopCorrelation;s.loopScore=loopCorrelation;
   const loopStrong=loopCorrelation>(narrow?.42:.46),loopNear=loopCorrelation>(narrow?.32:.35);
@@ -2124,16 +2180,10 @@ function appendLabelCameraLivePixels(frame,est){
     if(!s.loopCandidateFrames)s.loopCandidateStartX=direction==='left'?(s.previewStartX||0):(s.previewEndX||0);
     s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
     if(s.loopCandidateFrames>=2){
-      s.loopHint=true;
-      s.loopCutX=Number.isFinite(s.loopCandidateStartX)?s.loopCandidateStartX:(direction==='left'?(s.previewStartX||0):(s.previewEndX||0));
-      s.captureProgress=0;s.alignScore=0;
-      renderLabelCameraPreviewUi();
-      return false;
+      if((s.scanPass||1)===1){beginLabelCameraSecondPass(frame,direction);return false;}
+      s.pass2Complete=true;s.loopHint=true;s.loopCutX=Number.isFinite(s.loopCandidateStartX)?s.loopCandidateStartX:(direction==='left'?(s.previewStartX||0):(s.previewEndX||0));s.captureProgress=0;s.alignScore=0;renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Pass 2 complete. Press Done to build the HQ label.');return false;
     }
-  }else if(!loopNear){
-    s.loopCandidateFrames=0;
-    s.loopCandidateStartX=null;
-  }
+  }else if(!loopNear){s.loopCandidateFrames=0;s.loopCandidateStartX=null;}
 
   if(direction==='left'){
     const dst=Math.round((s.previewStartX||0)-newPx);if(dst<4)return false;
@@ -2142,7 +2192,7 @@ function appendLabelCameraLivePixels(frame,est){
     const dst=Math.round(s.previewEndX||0);if(dst+newPx>=pano.width-4)return false;
     ctx.drawImage(frame.canvas,overlapPx,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewEndX=dst+newPx;
   }
-  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();s.liveAddsSinceCapture=(s.liveAddsSinceCapture||0)+1;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[...(s.motionStepHistory||[]),est.newRatio].slice(-8);
+  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();s.liveAddsSinceCapture=(s.liveAddsSinceCapture||0)+1;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[...(s.motionStepHistory||[]),est.newRatio].slice(-8);if((s.scanPass||1)===2){s.pass2Travel=(s.pass2Travel||0)+newPx;labelCameraMatchPass1Map(frame);}
   renderLabelCameraPreviewUi();return true;
 }
 function advanceLabelCameraPreviewFromLive(){
@@ -2169,17 +2219,24 @@ function advanceLabelCameraPreviewFromLive(){
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
   const help=$('labelCameraInstructionText');
-  renderLabelCameraLastHqDisplay();
   if(!help)return;
   const wrap=help.closest?.('.label-camera-instruction');if(wrap)wrap.classList.remove('hidden');
   help.classList.remove('match-good','match-almost','match-loop');
-  if(!s.previewPanorama){help.textContent='Alignment 0%';return;}
+  if(!s.previewPanorama){help.textContent='Pass 1 · Alignment 0%';return;}
   const pct=Math.round(clamp(s.captureProgress||0,0,1)*100);
-  if(s.loopHint){help.textContent=`Alignment ${pct}% · Loop detected`;help.classList.add('match-loop');return;}
-  if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent='Alignment 100% · Capturing';help.classList.add('match-good');return;}
-  if(pct>=85){help.textContent=`Alignment ${pct}% · Ready`;help.classList.add('match-good');return;}
-  if(pct>=45){help.textContent=`Alignment ${pct}%`;help.classList.add('match-almost');return;}
-  help.textContent=`Alignment ${pct}%`;
+  if(s.pass2Complete||s.loopHint){help.textContent='Loop detected · Pass 2 complete · Ready to finish';help.classList.add('match-loop');return;}
+  if((s.passTransitionUntil||0)>performance.now()){help.textContent='Loop detected · Pass 1 complete · Continue for Pass 2';help.classList.add('match-good');return;}
+  if(labelCameraWorking&&labelCameraSessionCount>0){help.textContent=`Pass ${s.scanPass||1} · Alignment 100% · Capturing`;help.classList.add('match-good');return;}
+  if((s.scanPass||1)===2){
+    const coverage=Math.round(clamp(labelCameraHqCoverageRatio(),0,1)*100);
+    const confidence=Math.round(clamp(s.pass2MapConfidence||0,0,1)*100);
+    help.textContent=`Pass 2 · HQ coverage ${coverage}% · Map ${confidence}%`;
+    if(confidence>=65)help.classList.add('match-good');else if(confidence>=40)help.classList.add('match-almost');
+    return;
+  }
+  if(pct>=85){help.textContent=`Pass 1 · Alignment ${pct}% · Ready`;help.classList.add('match-good');return;}
+  if(pct>=45){help.textContent=`Pass 1 · Alignment ${pct}%`;help.classList.add('match-almost');return;}
+  help.textContent=`Pass 1 · Alignment ${pct}%`;
 }
 function drawLabelCameraOverlay(){
   const s=labelCameraGuideState,canvas=resizeLabelCameraOverlay(); if(!s||!canvas)return;
@@ -2355,7 +2412,9 @@ function tickLabelCamera(now=performance.now()){
         const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.920:.955);
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
-        const ready=!st.loopHint&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
+        const globalLayout=labelCameraCurrentGlobalLayout(),pass2Need=(st.scanPass||1)!==2||labelCameraCoverageNeedAt(globalLayout?.start||0,globalLayout?.frameWidth||motion.frameWidth);
+        const mapConfident=(st.scanPass||1)!==2||(st.pass2MapConfidence||0)>=.34;
+        const ready=!st.loopHint&&pass2Need&&mapConfident&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
         // v1.6.34: HQ watchdog. If the live panorama has clearly advanced for a while
         // but the classic alignment gate never fully opens, still request another HQ
         // keyframe once we have enough genuinely new live coverage and a stable frame.
@@ -2363,7 +2422,7 @@ function tickLabelCamera(now=performance.now()){
         const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?7:6);
         const watchdogCoverage=st.previewAdvance>=watchdogDistance||watchdogAdds;
         const watchdogStable=motion.score>=(narrow?.49:.50)&&referenceIdentity<(narrow?.935:.958);
-        const watchdogReady=!st.loopHint&&changedEnough&&watchdogCoverage&&watchdogStable;
+        const watchdogReady=!st.loopHint&&pass2Need&&mapConfident&&changedEnough&&watchdogCoverage&&watchdogStable;
         const normalCooldown=narrow?1650:1200,watchdogCooldown=narrow?2400:1900;
         if(st.auto&&!labelCameraWorking&&((ready&&now-st.lastCaptureAt>normalCooldown)||(watchdogReady&&now-st.lastCaptureAt>watchdogCooldown))){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
@@ -2428,7 +2487,11 @@ async function startLabelCamera(){
     if(track&&window.ImageCapture){
       try{ labelCameraImageCapture=new ImageCapture(track);prepareLabelCameraPhotoSettings(); }catch(err){ console.warn('ImageCapture unavailable',err); }
     }
-    const video=$('labelCameraVideo'); video.srcObject=labelCameraStream; await video.play().catch(()=>{}); labelCameraSessionCount=0; labelCameraCaptures=[]; $('labelCameraCount').textContent='0'; $('labelCameraMirrorToggle').checked=true; $('labelCameraMirrorToggle').disabled=true; $('labelCameraAutoToggle').checked=true; resetLabelCameraGuide(); clearLabelCameraPreviewUi(); $('labelCameraDialog').showModal(); stopLabelCameraLoop(); labelCameraRaf=requestAnimationFrame(tickLabelCamera);
+    const video=$('labelCameraVideo');video.srcObject=labelCameraStream;
+    if(!video.videoWidth)await new Promise(resolve=>{let settled=false;const done=()=>{if(settled)return;settled=true;video.removeEventListener('loadedmetadata',done);resolve();};video.addEventListener('loadedmetadata',done,{once:true});setTimeout(done,900);});
+    await video.play().catch(()=>{});labelCameraSessionCount=0;labelCameraCaptures=[];$('labelCameraCount').textContent='0';$('labelCameraMirrorToggle').checked=true;$('labelCameraMirrorToggle').disabled=true;$('labelCameraAutoToggle').checked=true;clearLabelCameraPreviewUi();$('labelCameraDialog').showModal();
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    labelCameraGuideState=defaultLabelCameraGuideState();syncLabelCameraMirror();resizeLabelCameraOverlay();drawLabelCameraOverlay();updateLabelCameraUi();stopLabelCameraLoop();labelCameraRaf=requestAnimationFrame(tickLabelCamera);
   }catch(err){ console.warn(err); toast('Camera could not open. Choose Photos instead.'); startHomeCameraBg(); }
 }
 function stopLabelCamera(resumeAmbient=true){ stopLabelCameraLoop(); labelCameraGuideState=null; labelCameraImageCapture=null; labelCameraPhotoSettings=null; if(labelCameraStream){labelCameraStream.getTracks().forEach(t=>t.stop()); labelCameraStream=null;} const video=$('labelCameraVideo'); if(video)video.srcObject=null; const mirrorToggle=$('labelCameraMirrorToggle'); if(mirrorToggle) mirrorToggle.disabled=false; if($('labelCameraDialog')?.open)$('labelCameraDialog').close(); clearLabelCameraPreviewUi(); if(resumeAmbient&&views.label.classList.contains('active'))startHomeCameraBg(); }
@@ -2440,14 +2503,16 @@ async function captureLabelCamera(fromAuto=false){
   // autofocus noise, Auto Capture may not save another HQ frame of the same view.
   if(fromAuto&&st?.loopHint){st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;updateLabelCameraUi();return;}
   if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
+    const globalForDup=labelCameraCurrentGlobalLayout(),allowDuplicateForGap=(st?.scanPass||1)===2&&labelCameraCoverageNeedAt(globalForDup?.start||0,globalForDup?.frameWidth||trackingFrame.canvas.width);
     const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
     const cutoff=trackingFrame.narrow?.928:.958;
-    if(identity>=cutoff){
+    if(identity>=cutoff&&!allowDuplicateForGap){
       st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.liveAddsSinceCapture=0;st.stationaryFrames=(st.stationaryFrames||0)+1;updateLabelCameraUi();return;
     }
   }
   const geometry=labelCameraCaptureGeometry();if(!geometry)return;
   const previewLayout=labelCameraCurrentPreviewLayout();
+  const globalLayout=labelCameraCurrentGlobalLayout();
   labelCameraWorking=true;if(st){st.lastCaptureAt=performance.now();st.guideLocked=true;}
   const direction=st?.previewDirection||'right';
   // v1.6.35: never advance the ghost from a live frame. The old HQ ghost stays frozen
@@ -2455,7 +2520,7 @@ async function captureLabelCamera(fromAuto=false){
   updateLabelCameraUi();drawLabelCameraOverlay();
   try{
     const record=await captureLabelCameraHighResRecord(video,geometry);if(!record)return;
-    record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;
+    record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;record.capturePass=st?.scanPass||1;record.mapLayout=globalLayout;
     if(fromAuto&&trackingFrame){
       const verified=await labelCameraVerifyHqRecord(record,trackingFrame);
       if(!verified.ok){
@@ -2486,12 +2551,11 @@ async function captureLabelCamera(fromAuto=false){
       if(hqTrackingFrame)current.previewAnchor=hqTrackingFrame;
       current.prevStrip=null;
       current.ghostVersion++;
-      current.lastHqGhostSide=direction==='left'?'left':'right';
-      try{current.lastHqDisplay=await labelCameraCaptureToCanvas(record,{maxEdge:720,mode:'core'});}catch(err){console.warn('Could not build last HQ display',err);}
       if(hqGhost)current.ghostPreview=hqGhost;
+      if(record.mapLayout&&current.pass1Complete)labelCameraMarkCoverage(record.mapLayout,record.capturePass===2?1:.86);
       updateLabelCameraUi();drawLabelCameraOverlay();
     }
-    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved while tracking.`:`First HQ section captured. Rotate slowly and follow the ghosted edge.`);
+    toast(fromAuto?`HQ keyframe ${labelCameraSessionCount} saved · Pass ${record.capturePass}.`:`First HQ section captured. Rotate slowly and follow the ghosted edge.`);
   }finally{labelCameraWorking=false;updateLabelCameraUi();}
 }
 function defaultLabelMesh(){
@@ -2822,12 +2886,16 @@ async function stitchLabelCameraCapturesFromPreview(captures,liveReference=null)
   if(!captures?.length)throw new Error('No panoramic captures');
   const entries=[];
   for(let i=0;i<captures.length;i++){
-    const capture=captures[i],layout=capture?.previewLayout;
+    const capture=captures[i],layout=capture?.mapLayout||capture?.previewLayout;
     if(!layout||!Number.isFinite(layout.start)||!Number.isFinite(layout.frameWidth)||layout.frameWidth<=0)return null;
     const piece=await labelCameraCaptureToCanvas(capture,{maxEdge:3200,mode:'core'});
     entries.push({capture,piece,layout,index:i});
     await new Promise(r=>setTimeout(r,0));
   }
+  entries.sort((a,b)=>a.layout.start-b.layout.start||((b.capture.capturePass||1)-(a.capture.capturePass||1)));
+  const spatial=[];
+  for(const e of entries){const prev=spatial[spatial.length-1];if(prev&&Math.abs(e.layout.start-prev.layout.start)<Math.max(2,e.layout.frameWidth*.055)){if((e.capture.capturePass||1)>=(prev.capture.capturePass||1))spatial[spatial.length-1]=e;}else spatial.push(e);}
+  entries.length=0;entries.push(...spatial);
   if(entries.length===1)return entries[0].piece;
 
   // v1.6.35: HQ captures are authoritative. The live panorama is only a tracking hint.
@@ -2844,37 +2912,18 @@ async function stitchLabelCameraCapturesFromPreview(captures,liveReference=null)
   });
 
   const stepHistory=[];
+  const baseMapStart=Number(normalized[0].layout.start)||0;
   normalized[0].x=0;
   for(let i=1;i<normalized.length;i++){
     const prev=normalized[i-1],cur=normalized[i];
-    const previewDelta=Math.abs((Number(cur.layout.start)||0)-(Number(prev.layout.start)||0))*pxPerPreview;
-    const liveSane=previewDelta>=targetW*.05&&previewDelta<=targetW*.68;
-    let hqEst=null;
-    try{hqEst=estimateLabelOverlap(prev.piece,cur.piece);}catch(err){console.warn('HQ overlap estimate unavailable',err);}
-    const hqDelta=hqEst?targetW-clamp(hqEst.overlap,0,targetW):0;
-    const hqSane=!!hqEst&&hqEst.score>=.34&&hqDelta>=targetW*.045&&hqDelta<=targetW*.68;
-    const recentMedian=stepHistory.length?medianNumber(stepHistory.slice(-5)):0;
-    let step;
-    if(hqSane&&liveSane&&Math.abs(hqDelta-previewDelta)<=targetW*.22){
-      // Agreement: let the high-resolution seam carry most of the weight while the live
-      // tracker gently stabilizes the placement.
-      step=hqDelta*.78+previewDelta*.22;
-    }else if(hqSane){
-      // Disagreement: trust the actual saved photographs over the live coordinate map.
-      step=hqDelta;
-    }else if(liveSane){
-      step=previewDelta;
-    }else if(recentMedian){
-      step=recentMedian;
-    }else{
-      // First-pair fail-safe roughly matches the normal auto-capture stride.
-      step=targetW*.20;
-    }
-    if(recentMedian&&step>Math.max(targetW*.42,recentMedian*2.8)&&!(hqSane&&hqEst.score>.58))step=Math.max(targetW*.16,recentMedian*1.9);
-    step=clamp(step,targetW*.045,targetW*.68);
-    cur.x=prev.x+Math.max(1,Math.round(step));
-    cur.placement={previewDelta,hqDelta,hqScore:hqEst?.score||0,step,source:hqSane?'hq':liveSane?'live':recentMedian?'history':'fallback'};
-    stepHistory.push(step);
+    const mapX=Math.max(0,((Number(cur.layout.start)||0)-baseMapStart)*pxPerPreview);
+    const previewDelta=Math.max(0,mapX-prev.x);
+    let hqEst=null;try{hqEst=estimateLabelOverlap(prev.piece,cur.piece);}catch(err){console.warn('HQ overlap estimate unavailable',err);}
+    const hqDelta=hqEst?targetW-clamp(hqEst.overlap,0,targetW):0,hqSane=!!hqEst&&hqEst.score>=.34&&hqDelta>=targetW*.045&&hqDelta<=targetW*.68;
+    let x=mapX,source='live-map';
+    if(hqSane){const hqX=prev.x+hqDelta,diff=Math.abs(hqX-mapX);if(diff<=targetW*.16){x=mapX*.74+hqX*.26;source='live-map+hq';}}
+    if(x<=prev.x+targetW*.035)x=prev.x+targetW*.035;
+    cur.x=Math.round(x);cur.placement={previewDelta,hqDelta,hqScore:hqEst?.score||0,step:cur.x-prev.x,source};stepHistory.push(cur.x-prev.x);
   }
 
   let coveredEnd=normalized[0].x+targetW;
@@ -2926,28 +2975,10 @@ async function labelCameraCaptureToCanvas(capture,options={}){
   }finally{bitmap.close?.();}
 }
 
-function trimLabelCameraLoopTail(captures,loopHint=false){
-  if(!captures?.length||captures.length<6)return captures||[];
-  const first=captures[0]?.trackingFrame;
-  if(!first)return captures;
-  let cutIndex=-1;
-  for(let i=captures.length-1;i>=Math.max(4,Math.floor(captures.length*.55));i--){
-    const frame=captures[i]?.trackingFrame;
-    if(!frame)continue;
-    const corr=labelCameraShiftCorrelation(first,frame);
-    const identity=labelCameraFrameIdentityScore(first,frame);
-    if(corr>(frame.narrow?.43:.46)||identity>(frame.narrow?.86:.90)){cutIndex=i;break;}
-  }
-  if(cutIndex>0&&(loopHint||captures.length-cutIndex<=3))return captures.slice(0,cutIndex);
-  return captures;
-}
-
 async function finalizeLabelCameraSession(){
   const count=labelCameraCaptures.length,direction=labelCameraGuideState?.previewDirection||'right';
   const liveReference=snapshotLabelCameraLiveReference();
-  const loopHint=!!labelCameraGuideState?.loopHint;
-  let captures=direction==='left'?[...labelCameraCaptures].reverse():[...labelCameraCaptures];
-  captures=trimLabelCameraLoopTail(captures,loopHint);
+  let captures=[...labelCameraCaptures];
   stopLabelCamera(false);
   if(!count){
     labelCameraCaptures=[];

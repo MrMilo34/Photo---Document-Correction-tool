@@ -353,3 +353,7 @@ body.pdf-mode .pdf-save{display:block}
 .label-camera-last-hq-thumb{display:block;flex:0 0 auto;max-width:160px;height:auto;border-radius:10px;border:1px solid rgba(87,217,255,.24);background:rgba(7,15,25,.95)}
 .label-camera-last-hq-copy{font-size:10px;line-height:1.25;color:#d9eef8}
 .label-camera-last-hq-copy strong{color:#ffffff}
+
+/* MeshDoctor v1.6.38: no HQ-photo card over the bottle. Compact status above shutter is sufficient. */
+.label-camera-first-shot{display:none!important}
+.label-camera-last-hq-head,.label-camera-last-hq-body,.label-camera-last-hq-thumb,.label-camera-last-hq-copy{display:none!important}
