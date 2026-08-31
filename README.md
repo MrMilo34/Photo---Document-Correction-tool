@@ -1,6 +1,6 @@
-# MeshDoctor v1.6.36
+# MeshDoctor v1.6.37
 
-## v1.6.36 first-lap loop detection
+## v1.6.37 first-lap loop detection
 - Uses the first accepted HQ capture as the rotation fingerprint.
 - Shift-tolerant correlation recognizes the same label area even if the return position is slightly offset.
 - Requires repeated confirmation after meaningful sweep/capture progress, reducing false loop matches on repetitive text.

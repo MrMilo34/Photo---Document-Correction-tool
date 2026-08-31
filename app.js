@@ -71,6 +71,8 @@ const LABEL_CAMERA_PREVIEW_H = 120;
 const LABEL_CAMERA_ASSIST_X = .18;
 const LABEL_CAMERA_ASSIST_Y = .025;
 const LABEL_CAMERA_GHOST_RATIO = .24;
+const LABEL_CAMERA_GHOST_INSET = .045;
+const LABEL_CAMERA_LAST_HQ_PREVIEW_H = 76;
 
 
 let points = [];
@@ -1771,6 +1773,8 @@ function defaultLabelCameraGuideState(){
     ghostPreview:null,
     liveGhostCanvas:null,
     ghostVersion:0,
+    lastHqDisplay:null,
+    lastHqGhostSide:'right',
     peakScore:0,
     previousScore:0,
     peakNewRatio:0,
@@ -1869,6 +1873,40 @@ function clearLabelCameraPreviewUi(){
   ctx.fillStyle='rgba(215,230,243,.86)';ctx.font='600 24px system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('Live stitched label will appear here',c.width/2,c.height/2-6);
   ctx.font='400 18px system-ui, sans-serif';ctx.fillStyle='rgba(159,176,191,.92)';ctx.fillText('Capture once, then rotate the item slowly.',c.width/2,c.height/2+24);
 }
+
+function labelCameraPreviewThumbCanvas(source,maxW=144,maxH=LABEL_CAMERA_LAST_HQ_PREVIEW_H){
+  if(!source?.width||!source?.height)return null;
+  const scale=Math.min(maxW/Math.max(1,source.width),maxH/Math.max(1,source.height),1);
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,Math.round(source.width*scale));
+  out.height=Math.max(1,Math.round(source.height*scale));
+  const ctx=out.getContext('2d');
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  ctx.drawImage(source,0,0,out.width,out.height);
+  return out;
+}
+function renderLabelCameraLastHqDisplay(){
+  const panel=$('labelCameraFirstShot'),s=labelCameraGuideState;
+  if(!panel)return;
+  if(!s?.lastHqDisplay){panel.classList.add('hidden');panel.innerHTML='';return;}
+  panel.innerHTML='';
+  const heading=document.createElement('div');
+  heading.className='label-camera-last-hq-head';
+  heading.textContent='Last HQ capture';
+  const body=document.createElement('div');
+  body.className='label-camera-last-hq-body';
+  const thumb=labelCameraPreviewThumbCanvas(s.lastHqDisplay,160,LABEL_CAMERA_LAST_HQ_PREVIEW_H);
+  if(thumb){thumb.className='label-camera-last-hq-thumb';body.appendChild(thumb);}
+  const copy=document.createElement('div');
+  copy.className='label-camera-last-hq-copy';
+  const directionText=(s.previewDirection||s.lastHqGhostSide||'right')==='left'?'right':'left';
+  copy.innerHTML=`<strong>Ghost anchor:</strong> next section lines up against the ${directionText} side of this saved capture.`;
+  body.appendChild(copy);
+  panel.appendChild(heading);
+  panel.appendChild(body);
+  panel.classList.remove('hidden');
+}
+
 function renderLabelCameraPreviewUi(){
   const c=$('labelCameraPreviewCanvas'),meta=$('labelCameraPreviewMeta'),s=labelCameraGuideState;
   if(meta) meta.textContent=`${s?.previewFrameCount||0} live addition${(s?.previewFrameCount||0)===1?'':'s'} · ${labelCameraSessionCount} HQ capture${labelCameraSessionCount===1?'':'s'}`;
@@ -1882,6 +1920,7 @@ function renderLabelCameraPreviewUi(){
   const dw=Math.max(1,Math.round(sw*scale)),dh=Math.max(1,Math.round(pano.height*scale)),dx=pad,dy=Math.round((c.height-dh)/2);
   ctx.strokeStyle='rgba(87,217,255,.16)';ctx.lineWidth=2;ctx.strokeRect(dx-1,dy-1,dw+2,dh+2);ctx.drawImage(pano,sx,0,sw,pano.height,dx,dy,dw,dh);
   ctx.fillStyle='rgba(53,207,255,.18)';ctx.fillRect(pad,c.height-7,availW,3);ctx.fillStyle='rgba(53,207,255,.92)';ctx.fillRect(pad,c.height-7,Math.max(24,Math.min(availW,dw)),3);
+  renderLabelCameraLastHqDisplay();
 }
 function labelCameraLowResFrame(){
   const s=labelCameraGuideState,video=$('labelCameraVideo'),crop=labelCameraSourceCrop(0,0);if(!s||!video?.videoWidth||!crop)return null;
@@ -2129,8 +2168,8 @@ function advanceLabelCameraPreviewFromLive(){
 }
 function updateLabelCameraUi(){
   const s=labelCameraGuideState;if(!s)return;
-  const first=$('labelCameraFirstShot'),help=$('labelCameraInstructionText');
-  if(first){first.classList.add('hidden');first.textContent='';}
+  const help=$('labelCameraInstructionText');
+  renderLabelCameraLastHqDisplay();
   if(!help)return;
   const wrap=help.closest?.('.label-camera-instruction');if(wrap)wrap.classList.remove('hidden');
   help.classList.remove('match-good','match-almost','match-loop');
@@ -2154,15 +2193,22 @@ function drawLabelCameraOverlay(){
   // Normal rightward panorama motion therefore shows the accepted label on the left,
   // exactly like a panorama camera guide. Reverse motion is mirrored automatically.
   if(ghost){
-    const desiredGhostW=Math.max(24*(window.devicePixelRatio||1),(right-left)*LABEL_CAMERA_GHOST_RATIO);
-    const edgeGap=0;
+    const edgeGap=0,gh=bottom-top;
+    const ghostAspect=ghost.width&&ghost.height?ghost.width/ghost.height:LABEL_CAMERA_GHOST_RATIO;
+    const desiredGhostW=Math.max(24*(window.devicePixelRatio||1),gh*ghostAspect);
     const available=direction==='left'?(canvas.width-right-edgeGap):(left-edgeGap);
     const ghostW=Math.max(14,Math.min(desiredGhostW,Math.max(14,available)));
-    const gx=direction==='left'?right+edgeGap:left-edgeGap-ghostW,gy=top,gh=bottom-top;
+    const gx=direction==='left'?right+edgeGap:left-edgeGap-ghostW,gy=top;
     ctx.save();
     ctx.beginPath();ctx.rect(gx,gy,ghostW,gh);ctx.clip();
     ctx.globalAlpha=.48;
     ctx.drawImage(ghost,gx,gy,ghostW,gh);
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle='rgba(255,79,227,.55)';ctx.lineWidth=Math.max(1.5,canvas.width*.0014);
+    ctx.beginPath();
+    const seamX=direction==='left'?right:left;
+    ctx.moveTo(seamX,top);ctx.lineTo(seamX,bottom);ctx.stroke();
     ctx.restore();
   }
 
@@ -2223,8 +2269,8 @@ function labelCameraRectNorm(rect,video){
 }
 function labelCameraLiveGhostPreview(side='right'){
   const s=labelCameraGuideState,video=$('labelCameraVideo'),geom=labelCameraCaptureGeometry();if(!s||!video?.videoWidth||!geom)return null;
-  const core=geom.core,ratio=LABEL_CAMERA_GHOST_RATIO;
-  const sx=side==='left'?core.sx:core.sx+core.sw*(1-ratio),sw=Math.max(2,core.sw*ratio);
+  const core=geom.core,ratio=LABEL_CAMERA_GHOST_RATIO,inset=LABEL_CAMERA_GHOST_INSET;
+  const sx=side==='left'?core.sx+core.sw*inset:core.sx+core.sw*(1-ratio-inset),sw=Math.max(2,core.sw*ratio);
   const targetH=240,scale=targetH/Math.max(1,core.sh),targetW=Math.max(64,Math.round(sw*scale));
   let out=s.liveGhostCanvas;if(!out){out=document.createElement('canvas');s.liveGhostCanvas=out;}
   if(out.width!==targetW||out.height!==targetH){out.width=targetW;out.height=targetH;}
@@ -2234,8 +2280,8 @@ function labelCameraLiveGhostPreview(side='right'){
 async function labelCameraGhostFromCapture(capture,side='right'){
   const meta=await labelCameraCaptureToCanvas(capture,{withMeta:true,maxEdge:900,mode:'assist'});
   if(!meta?.canvas||!meta.coreRect)return null;
-  const {canvas,coreRect}=meta,ratio=LABEL_CAMERA_GHOST_RATIO;
-  const sx=side==='left'?coreRect.x:coreRect.x+coreRect.w*(1-ratio),sw=Math.max(2,coreRect.w*ratio);
+  const {canvas,coreRect}=meta,ratio=LABEL_CAMERA_GHOST_RATIO,inset=LABEL_CAMERA_GHOST_INSET;
+  const sx=side==='left'?coreRect.x+coreRect.w*inset:coreRect.x+coreRect.w*(1-ratio-inset),sw=Math.max(2,coreRect.w*ratio);
   const out=document.createElement('canvas');
   const targetH=Math.min(480,Math.max(320,Math.round(coreRect.h)));const scale=targetH/Math.max(1,coreRect.h);
   out.width=Math.max(96,Math.round(sw*scale));out.height=targetH;
@@ -2423,6 +2469,11 @@ async function captureLabelCamera(fromAuto=false){
     let hqTrackingFrame=null,hqGhost=null;
     try{hqTrackingFrame=await labelCameraTrackingFrameFromCapture(record,trackingFrame||st?.previewAnchor||null);}catch(err){console.warn('Could not build HQ tracking reference',err);}
     try{hqGhost=await labelCameraGhostFromCapture(record,direction==='left'?'left':'right');}catch(err){console.warn('Could not build HQ ghost reference',err);}
+    if(st&&labelCameraSessionCount===0&&hqTrackingFrame){
+      const pano=document.createElement('canvas');pano.width=1600;pano.height=hqTrackingFrame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
+      const startX=520;ctx.drawImage(hqTrackingFrame.canvas,startX,0);
+      st.previewPanorama=pano;st.previewStartX=startX;st.previewEndX=startX+hqTrackingFrame.canvas.width;st.previewAnchor=hqTrackingFrame;st.firstPreviewFrame=hqTrackingFrame;st.previewFrameCount=1;st.previewAdvance=0;
+    }
     if(st&&!st.firstHqReferenceFrame&&hqTrackingFrame)st.firstHqReferenceFrame=hqTrackingFrame;
     record.trackingFrame=hqTrackingFrame||null;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();
@@ -2435,6 +2486,8 @@ async function captureLabelCamera(fromAuto=false){
       if(hqTrackingFrame)current.previewAnchor=hqTrackingFrame;
       current.prevStrip=null;
       current.ghostVersion++;
+      current.lastHqGhostSide=direction==='left'?'left':'right';
+      try{current.lastHqDisplay=await labelCameraCaptureToCanvas(record,{maxEdge:720,mode:'core'});}catch(err){console.warn('Could not build last HQ display',err);}
       if(hqGhost)current.ghostPreview=hqGhost;
       updateLabelCameraUi();drawLabelCameraOverlay();
     }
@@ -2872,10 +2925,29 @@ async function labelCameraCaptureToCanvas(capture,options={}){
     return options.withMeta?{canvas:c,coreRect}:c;
   }finally{bitmap.close?.();}
 }
+
+function trimLabelCameraLoopTail(captures,loopHint=false){
+  if(!captures?.length||captures.length<6)return captures||[];
+  const first=captures[0]?.trackingFrame;
+  if(!first)return captures;
+  let cutIndex=-1;
+  for(let i=captures.length-1;i>=Math.max(4,Math.floor(captures.length*.55));i--){
+    const frame=captures[i]?.trackingFrame;
+    if(!frame)continue;
+    const corr=labelCameraShiftCorrelation(first,frame);
+    const identity=labelCameraFrameIdentityScore(first,frame);
+    if(corr>(frame.narrow?.43:.46)||identity>(frame.narrow?.86:.90)){cutIndex=i;break;}
+  }
+  if(cutIndex>0&&(loopHint||captures.length-cutIndex<=3))return captures.slice(0,cutIndex);
+  return captures;
+}
+
 async function finalizeLabelCameraSession(){
   const count=labelCameraCaptures.length,direction=labelCameraGuideState?.previewDirection||'right';
   const liveReference=snapshotLabelCameraLiveReference();
-  const captures=direction==='left'?[...labelCameraCaptures].reverse():[...labelCameraCaptures];
+  const loopHint=!!labelCameraGuideState?.loopHint;
+  let captures=direction==='left'?[...labelCameraCaptures].reverse():[...labelCameraCaptures];
+  captures=trimLabelCameraLoopTail(captures,loopHint);
   stopLabelCamera(false);
   if(!count){
     labelCameraCaptures=[];

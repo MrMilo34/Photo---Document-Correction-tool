@@ -341,8 +341,15 @@ body.pdf-mode .pdf-save{display:block}
 
 
 /* v1.6.34: compact alignment progress is visible; large image instructions remain gone */
-.label-camera-first-shot{display:none!important}
+.label-camera-first-shot{display:flex!important;flex-direction:column;align-items:stretch;gap:6px;min-height:72px;padding:8px 10px;border-radius:14px}
 .label-camera-instruction{display:flex!important;position:absolute;left:14px;right:14px;bottom:12px;padding:8px 11px;border-radius:14px;z-index:5;background:rgba(4,10,17,.88)!important;border:1px solid rgba(87,217,255,.18);flex-direction:column;gap:2px;pointer-events:none}
 .label-camera-instruction strong{font-size:11px}
 #labelCameraInstructionText{font-size:10.5px;line-height:1.25;font-weight:800}
 .label-camera-instruction.hidden{display:none!important}
+
+
+.label-camera-last-hq-head{font-size:10px;font-weight:850;letter-spacing:.03em;text-transform:uppercase;color:#bfefff}
+.label-camera-last-hq-body{display:flex;align-items:center;gap:10px}
+.label-camera-last-hq-thumb{display:block;flex:0 0 auto;max-width:160px;height:auto;border-radius:10px;border:1px solid rgba(87,217,255,.24);background:rgba(7,15,25,.95)}
+.label-camera-last-hq-copy{font-size:10px;line-height:1.25;color:#d9eef8}
+.label-camera-last-hq-copy strong{color:#ffffff}
