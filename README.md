@@ -1,4 +1,11 @@
-# MeshDoctor v1.6.38
+# MeshDoctor v1.6.39
+
+## v1.6.39 hybrid 1.6.27 performance pass
+- Restores live-map-authoritative HQ placement and continuous live tracking across HQ shutter events.
+- Retains two-pass map/coverage, HQ ghost, loop detection, and repeated-text jump protection.
+- Adds purple asymmetric right/bottom resize handles; pink left/top handles remain symmetric.
+- Adds repeated camera overlay layout refresh to eliminate the cyan initial sizing state.
+
 
 ## v1.6.38 first-lap loop detection
 - Uses the first accepted HQ capture as the rotation fingerprint.
