@@ -1751,6 +1751,7 @@ function defaultLabelCameraGuideState(){
     previewFrameCount:0,
     previewAnchor:null,
     firstPreviewFrame:null,
+    firstHqReferenceFrame:null,
     previewDirection:null,
     previewAdvance:0,
     lastPreviewAt:0,
@@ -1760,6 +1761,7 @@ function defaultLabelCameraGuideState(){
     loopCandidateStartX:null,
     loopCutX:null,
     loopScore:0,
+    loopCorrelation:0,
     trackingLostFrames:0,
     stationaryFrames:0,
     lastCaptureReferenceFrame:null,
@@ -2001,11 +2003,36 @@ function labelCameraFrameIdentityScore(a,b){
   const rawScore=sameLabelCameraFrameScore(a,b);
   return clamp(edgeScore*.72+rawScore*.28,0,1);
 }
+// v1.6.36 loop fingerprint. A bottle rarely returns to the first view at the exact
+// same horizontal pixel. Pearson correlation is exposure tolerant and the small shift
+// search lets the first accepted HQ photograph act as a genuine full-rotation marker
+// without mistaking generic black/white text blocks for the same place on the label.
+function labelCameraShiftCorrelation(a,b){
+  if(!a||!b||a.gw!==b.gw||a.gh!==b.gh)return -1;
+  const gw=a.gw,gh=a.gh,maxDx=Math.max(2,Math.round(gw*.16)),maxDy=Math.max(2,Math.round(gh*.055));
+  let best=-1;
+  for(let dy=-maxDy;dy<=maxDy;dy+=2){
+    for(let dx=-maxDx;dx<=maxDx;dx+=2){
+      const x0=Math.max(1,dx+1),x1=Math.min(gw-1,gw+dx-1),y0=Math.max(1,dy+1),y1=Math.min(gh-1,gh+dy-1);
+      if(x1-x0<gw*.70||y1-y0<gh*.82)continue;
+      let n=0,sa=0,sb=0,sea=0,seb=0;
+      for(let y=y0;y<y1;y+=2){const by=y-dy;for(let x=x0;x<x1;x+=2){const bx=x-dx,ai=y*gw+x,bi=by*gw+bx;sa+=a.gray[ai];sb+=b.gray[bi];sea+=a.edge?.[ai]||0;seb+=b.edge?.[bi]||0;n++;}}
+      if(n<40)continue;
+      const ma=sa/n,mb=sb/n,mea=sea/n,meb=seb/n;
+      let cov=0,va=0,vb=0,ecov=0,eva=0,evb=0;
+      for(let y=y0;y<y1;y+=2){const by=y-dy;for(let x=x0;x<x1;x+=2){const bx=x-dx,ai=y*gw+x,bi=by*gw+bx,da=a.gray[ai]-ma,db=b.gray[bi]-mb,dea=(a.edge?.[ai]||0)-mea,deb=(b.edge?.[bi]||0)-meb;cov+=da*db;va+=da*da;vb+=db*db;ecov+=dea*deb;eva+=dea*dea;evb+=deb*deb;}}
+      const grayCorr=(va>1&&vb>1)?cov/Math.sqrt(va*vb):-1,edgeCorr=(eva>1&&evb>1)?ecov/Math.sqrt(eva*evb):grayCorr;
+      const coverage=((x1-x0)*(y1-y0))/(gw*gh),score=(grayCorr*.76+edgeCorr*.24)-(1-coverage)*.08;
+      if(score>best)best=score;
+    }
+  }
+  return best;
+}
 function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopHint=false;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];renderLabelCameraPreviewUi();return frame;
 }
 function appendLabelCameraLivePixels(frame,est){
   const s=labelCameraGuideState;if(!s||!frame||!est)return false;
@@ -2044,19 +2071,18 @@ function appendLabelCameraLivePixels(frame,est){
   const overlapPx=clamp(Math.round((est.overlap/frame.gw)*frame.canvas.width),1,frame.canvas.width-1),newPx=frame.canvas.width-overlapPx;if(newPx<1)return false;
   const ctx=pano.getContext('2d',{alpha:false}),direction=s.previewDirection||s.directionCandidate||est.direction;
 
-  // v1.6.34 loop closure:
-  // Once one circumference has been collected, compare incoming live frames directly
-  // with the starting view. The FIRST likely repeat marks the exact cut boundary.
-  // A second consecutive confirmation closes the loop, stops further auto captures,
-  // and later trims both the live map and HQ composite back to that saved boundary.
-  const usedBefore=(s.previewEndX||0)-(s.previewStartX||0);
-  const enoughSweep=s.previewFrameCount>=16&&usedBefore>frame.canvas.width*(narrow?3.65:3.25)&&labelCameraSessionCount>=4;
-  const loopScore=enoughSweep?labelCameraFrameIdentityScore(s.firstPreviewFrame,frame):0;
-  s.loopScore=loopScore;
-  if(enoughSweep&&loopScore>(narrow?.895:.905)){
-    if(!s.loopCandidateFrames){
-      s.loopCandidateStartX=direction==='left'?(s.previewStartX||0):(s.previewEndX||0);
-    }
+  // v1.6.36 full-rotation closure:
+  // Use the FIRST ACCEPTED HQ frame as the loop fingerprint, not the initial low-res
+  // preview. The previous broad similarity metric could miss the true first return and
+  // later false-trigger on another black/white panel. A shift-tolerant correlation
+  // recognizes the same physical print even when the bottle returns a little left/right.
+  const usedBefore=(s.previewEndX||0)-(s.previewStartX||0),loopReference=s.firstHqReferenceFrame||s.firstPreviewFrame;
+  const enoughSweep=s.previewFrameCount>=15&&usedBefore>frame.canvas.width*(narrow?1.85:2.05)&&labelCameraSessionCount>=5;
+  const loopCorrelation=enoughSweep?labelCameraShiftCorrelation(loopReference,frame):-1;
+  s.loopCorrelation=loopCorrelation;s.loopScore=loopCorrelation;
+  const loopStrong=loopCorrelation>(narrow?.42:.46),loopNear=loopCorrelation>(narrow?.32:.35);
+  if(enoughSweep&&loopStrong){
+    if(!s.loopCandidateFrames)s.loopCandidateStartX=direction==='left'?(s.previewStartX||0):(s.previewEndX||0);
     s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
     if(s.loopCandidateFrames>=2){
       s.loopHint=true;
@@ -2065,7 +2091,7 @@ function appendLabelCameraLivePixels(frame,est){
       renderLabelCameraPreviewUi();
       return false;
     }
-  }else{
+  }else if(!loopNear){
     s.loopCandidateFrames=0;
     s.loopCandidateStartX=null;
   }
@@ -2397,6 +2423,8 @@ async function captureLabelCamera(fromAuto=false){
     let hqTrackingFrame=null,hqGhost=null;
     try{hqTrackingFrame=await labelCameraTrackingFrameFromCapture(record,trackingFrame||st?.previewAnchor||null);}catch(err){console.warn('Could not build HQ tracking reference',err);}
     try{hqGhost=await labelCameraGhostFromCapture(record,direction==='left'?'left':'right');}catch(err){console.warn('Could not build HQ ghost reference',err);}
+    if(st&&!st.firstHqReferenceFrame&&hqTrackingFrame)st.firstHqReferenceFrame=hqTrackingFrame;
+    record.trackingFrame=hqTrackingFrame||null;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();
     if(labelCameraGuideState){
       const current=labelCameraGuideState;
@@ -3083,4 +3111,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.35', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.36', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }

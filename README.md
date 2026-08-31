@@ -1,4 +1,10 @@
-# MeshDoctor v1.6.35
+# MeshDoctor v1.6.36
+
+## v1.6.36 first-lap loop detection
+- Uses the first accepted HQ capture as the rotation fingerprint.
+- Shift-tolerant correlation recognizes the same label area even if the return position is slightly offset.
+- Requires repeated confirmation after meaningful sweep/capture progress, reducing false loop matches on repetitive text.
+- Stops Auto Capture on the first genuine completed revolution instead of drifting into a second pass.
 
 ## v1.6.35 HQ-authoritative tracking fix
 - Ghost/reference image is now created only from the last accepted HQ capture. Live frames never temporarily replace or advance it.
