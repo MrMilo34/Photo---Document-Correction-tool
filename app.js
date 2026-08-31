@@ -1324,18 +1324,30 @@ async function gptRestoreImage(img,mode){
 
 async function gptRestorePanoramaTiled(img,mode='document'){
   const src=document.createElement('canvas');src.width=img.width;src.height=img.height;src.getContext('2d').putImageData(img,0,0);
-  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.55))),overlap=Math.max(80,Math.round(maxTileW*.16)),step=Math.max(320,maxTileW-overlap),positions=[];
+  const maxTileW=Math.max(640,Math.min(img.width,Math.floor(img.height*2.55))),overlap=Math.max(80,Math.round(maxTileW*.18)),step=Math.max(320,maxTileW-overlap),positions=[];
   for(let x=0;x<img.width;x+=step){let w=Math.min(maxTileW,img.width-x);if(img.width-(x+w)>0&&img.width-(x+w)<overlap){w=img.width-x;}positions.push({x,w});if(x+w>=img.width)break;}
   const out=document.createElement('canvas');out.width=img.width;out.height=img.height;const ox=out.getContext('2d');
+  // Always retain a complete-width source underneath the AI tiles. Even a failed or
+  // transparent AI section can therefore never collapse/crop the finished panorama.
+  ox.drawImage(src,0,0);
   for(let i=0;i<positions.length;i++){
     const {x,w}=positions[i];$('busyText').textContent=`AI polishing label section · ${i+1}/${positions.length}`;
     const tc=document.createElement('canvas');tc.width=w;tc.height=img.height;tc.getContext('2d').drawImage(src,x,0,w,img.height,0,0,w,img.height);let tile=tc.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,img.height),restored;
     try{restored=await gptRestoreImage(tile,mode);}catch(err){console.warn('AI tile restore fallback',i,err);restored=cleanupImage(tile);}
     const rc=document.createElement('canvas');rc.width=restored.width;rc.height=restored.height;rc.getContext('2d').putImageData(restored,0,0);const normalized=document.createElement('canvas');normalized.width=w;normalized.height=img.height;normalized.getContext('2d').drawImage(rc,0,0,w,img.height);
-    if(i===0){ox.drawImage(normalized,x,0);}else{const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalized,0,0);tx.globalCompositeOperation='destination-in';const leftOverlap=Math.min(overlap,w),g=tx.createLinearGradient(0,0,leftOverlap,0);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');tx.fillStyle=g;tx.fillRect(0,0,leftOverlap,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);}
+    if(i===0){ox.drawImage(normalized,x,0);}else{
+      const tmp=document.createElement('canvas');tmp.width=w;tmp.height=img.height;const tx=tmp.getContext('2d');tx.drawImage(normalized,0,0);
+      tx.globalCompositeOperation='destination-in';
+      const leftOverlap=Math.min(overlap,w),fadeFrac=clamp(leftOverlap/Math.max(1,w),.001,.999),g=tx.createLinearGradient(0,0,w,0);
+      g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(fadeFrac,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,1)');
+      tx.fillStyle=g;
+      // Critical: apply the mask across the WHOLE tile. Older code filled only the
+      // overlap width while using destination-in, which could discard the rest of tile 2.
+      tx.fillRect(0,0,w,img.height);tx.globalCompositeOperation='source-over';ox.drawImage(tmp,x,0);
+    }
     await new Promise(r=>setTimeout(r,0));
   }
-  setAiEngineStatus('ready',`AI Image · tiled ${mode} restore complete`);return out.getContext('2d',{willReadFrequently:true}).getImageData(0,0,out.width,out.height);
+  setAiEngineStatus('ready',`AI Image · tiled ${mode} restore complete`);return out.getContext('2d',{willReadFrequently:true}).getImageData(0,0,img.width,img.height);
 }
 
 async function runAiRestoreChoice(choice){
@@ -2074,6 +2086,28 @@ function labelCameraShiftCorrelation(a,b){
   }
   return best;
 }
+
+// v1.6.40: loop closure deliberately uses several independent signals. Cylindrical
+// labels return with slightly different glare/scale every lap, so Pearson correlation
+// alone can miss the real start. Requiring repeated agreement after a substantial sweep
+// is safer than requiring one overly-perfect match.
+function labelCameraLoopReturnEvidence(reference,frame){
+  if(!reference||!frame)return {strong:false,near:false,score:0,corr:-1,identity:0,raw:0};
+  const corr=labelCameraShiftCorrelation(reference,frame);
+  const identity=labelCameraFrameIdentityScore(reference,frame);
+  const raw=sameLabelCameraFrameScore(reference,frame);
+  const narrow=!!frame.narrow;
+  const strong=corr>(narrow?.30:.34)||identity>(narrow?.80:.84)||raw>(narrow?.835:.87);
+  const near=corr>(narrow?.20:.23)||identity>(narrow?.735:.77)||raw>(narrow?.77:.81);
+  // normalized diagnostic score only; decisions above retain the independent metrics.
+  const score=Math.max(
+    clamp((corr-.12)/.55,0,1),
+    clamp((identity-.62)/.34,0,1),
+    clamp((raw-.68)/.27,0,1)
+  );
+  return {strong,near,score,corr,identity,raw};
+}
+
 function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
@@ -2170,13 +2204,18 @@ function appendLabelCameraLivePixels(frame,est){
   // rotation cannot legitimately jump most of the capture box in one accepted frame.
   // Repeated blocks of small text were doing exactly that and stretching the panorama.
   const maxInstantTravel=narrow?.42:.36;
-  // v1.6.39 hybrid: v1.6.27 was much better at staying alive through ordinary label
-  // detail because it did not reject every close second-best match. Keep small ambiguous
-  // movements, but still reject the large repeated-text jumps that caused the thin-strip failure.
-  if(est.ambiguous&&est.newRatio>(narrow?.18:.15)){est.rejectReason='ambiguous';s.ambiguousFrames=(s.ambiguousFrames||0)+1;return false;}
   const history=(s.motionStepHistory||[]).filter(Number.isFinite),medianStep=history.length>=3?medianNumber(history):0;
-  const continuityLimit=medianStep?Math.max(.17,medianStep*3.35):maxInstantTravel;
-  if(est.newRatio>maxInstantTravel||(medianStep&&est.newRatio>continuityLimit&&est.newRatio>medianStep+.14)){
+  // v1.6.40: repeated ingredients/instruction text naturally produces several equally
+  // plausible overlap solutions. v1.6.27 kept moving through those regions; later builds
+  // became too conservative and simply stopped mapping the text. Ambiguity by itself is
+  // no longer a rejection. Reject it only when the proposed travel is inconsistent with
+  // the recent physical rotation (or is implausibly large before history exists).
+  if(est.ambiguous){
+    const ambiguousLimit=medianStep?Math.max(.24,medianStep*2.85):Math.min(maxInstantTravel,narrow?.32:.28);
+    if(est.newRatio>ambiguousLimit){est.rejectReason='ambiguous-jump';s.ambiguousFrames=(s.ambiguousFrames||0)+1;return false;}
+  }
+  const continuityLimit=medianStep?Math.max(.18,medianStep*3.5):maxInstantTravel;
+  if(est.newRatio>maxInstantTravel||(medianStep&&est.newRatio>continuityLimit&&est.newRatio>medianStep+.15)){
     est.rejectReason='jump';s.rejectedMotionFrames=(s.rejectedMotionFrames||0)+1;return false;
   }
 
@@ -2201,19 +2240,23 @@ function appendLabelCameraLivePixels(frame,est){
   const usedBefore=(s.previewEndX||0)-(s.previewStartX||0);
   const loopReference=(s.scanPass||1)===2?(s.pass2StartReference||s.firstHqReferenceFrame||s.firstPreviewFrame):(s.firstHqReferenceFrame||s.firstPreviewFrame);
   const passTravel=(s.scanPass||1)===2?(s.pass2Travel||usedBefore):usedBefore;
-  const requiredSweep=(s.scanPass||1)===2?Math.max(frame.canvas.width*1.8,(s.pass1MapWidth||0)*.72):frame.canvas.width*(narrow?1.85:2.05);
-  const enoughSweep=s.previewFrameCount>=15&&passTravel>requiredSweep&&labelCameraSessionCount>=1;
-  const loopCorrelation=enoughSweep?labelCameraShiftCorrelation(loopReference,frame):-1;
-  s.loopCorrelation=loopCorrelation;s.loopScore=loopCorrelation;
-  const loopStrong=loopCorrelation>(narrow?.42:.46),loopNear=loopCorrelation>(narrow?.32:.35);
-  if(enoughSweep&&loopStrong){
+  // A full wrap must have travelled substantially before the start is allowed to match.
+  // This lets us lower the visual threshold enough to survive glare/text while avoiding
+  // an early false closure on a similar black/white panel.
+  const requiredSweep=(s.scanPass||1)===2
+    ?Math.max(frame.canvas.width*2.6,(s.pass1MapWidth||0)*.78)
+    :frame.canvas.width*(narrow?3.15:2.85);
+  const enoughSweep=s.previewFrameCount>=18&&passTravel>requiredSweep&&labelCameraSessionCount>=4;
+  const evidence=enoughSweep?labelCameraLoopReturnEvidence(loopReference,frame):{strong:false,near:false,score:0,corr:-1,identity:0,raw:0};
+  s.loopCorrelation=evidence.corr;s.loopScore=evidence.score;
+  if(enoughSweep&&evidence.strong){
     if(!s.loopCandidateFrames)s.loopCandidateStartX=direction==='left'?(s.previewStartX||0):(s.previewEndX||0);
     s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
-    if(s.loopCandidateFrames>=2){
+    if(s.loopCandidateFrames>=3){
       if((s.scanPass||1)===1){beginLabelCameraSecondPass(frame,direction);return false;}
       s.pass2Complete=true;s.loopHint=true;s.loopCutX=Number.isFinite(s.loopCandidateStartX)?s.loopCandidateStartX:(direction==='left'?(s.previewStartX||0):(s.previewEndX||0));s.captureProgress=0;s.alignScore=0;renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Pass 2 complete. Press Done to build the HQ label.');return false;
     }
-  }else if(!loopNear){s.loopCandidateFrames=0;s.loopCandidateStartX=null;}
+  }else if(!evidence.near){s.loopCandidateFrames=0;s.loopCandidateStartX=null;}
 
   if(direction==='left'){
     const dst=Math.round((s.previewStartX||0)-newPx);if(dst<4)return false;

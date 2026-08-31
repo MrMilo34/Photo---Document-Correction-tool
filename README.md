@@ -1,6 +1,13 @@
-# MeshDoctor v1.6.39
+# MeshDoctor v1.6.40
 
-## v1.6.39 hybrid 1.6.27 performance pass
+## v1.6.40 text tracking, Pass 2 and wide AI fix
+
+- Dense/repetitive printed text no longer gets rejected merely because several overlap matches are plausible; physical-motion continuity now decides whether the match is safe.
+- Full-loop recognition combines shift correlation, full-frame identity and raw similarity over repeated frames, allowing Pass 1 to transition reliably into Pass 2 despite glare and slight bottle-position changes.
+- Pass 2 keeps the live-map/HQ-gap-fill architecture introduced in the current branch.
+- Wide-label AI tiling now starts from a full-width source canvas and blends every restored tile across its full mask. Later tiles can no longer erase the non-overlap portion of the panorama.
+- Pink symmetric and purple asymmetric camera handles from v1.6.39 are retained.
+
 - Restores live-map-authoritative HQ placement and continuous live tracking across HQ shutter events.
 - Retains two-pass map/coverage, HQ ghost, loop detection, and repeated-text jump protection.
 - Adds purple asymmetric right/bottom resize handles; pink left/top handles remain symmetric.
