@@ -369,3 +369,40 @@ body.pdf-mode .pdf-save{display:block}
 .side-layout-btn.active{background:linear-gradient(135deg,rgba(255,79,227,.20),rgba(53,207,255,.18));border-color:rgba(87,217,255,.58);color:#eafaff;box-shadow:0 0 18px rgba(53,207,255,.08)}
 .side-image-list{padding-bottom:8px}
 .side-by-side-view .pdf-save{z-index:15}
+
+
+/* MeshDoctor v1.6.42 - Correct Image Camera / Gallery action chooser */
+.correct-action-dialog{
+  width:min(680px,calc(100% - 28px));
+  max-width:680px;
+  border:1px solid rgba(87,217,255,.14);
+  border-radius:34px;
+  padding:0;
+  overflow:hidden;
+  background:rgba(9,12,17,.985);
+  color:#f4f8fb;
+  box-shadow:0 30px 100px rgba(0,0,0,.70),0 0 34px rgba(53,207,255,.05);
+}
+.correct-action-dialog::backdrop{background:rgba(0,0,0,.74);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.correct-action-shell{padding:30px 28px 28px}
+.correct-action-title{font-size:clamp(26px,6vw,40px);line-height:1.08;font-weight:760;letter-spacing:-.025em;margin:0 0 34px;color:#f7f9fb}
+.correct-action-options{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.correct-action-option{
+  appearance:none;border:0;background:transparent;color:#eef4f8;
+  min-height:190px;border-radius:28px;padding:22px 14px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+  font:inherit;cursor:pointer;touch-action:manipulation;
+}
+.correct-action-option:active{background:rgba(255,255,255,.055);transform:scale(.985)}
+.correct-action-option:focus-visible{outline:2px solid rgba(83,225,255,.9);outline-offset:2px}
+.correct-action-option svg{width:76px;height:76px;fill:none;stroke:currentColor;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round;opacity:.96}
+.correct-action-option span{font-size:24px;font-weight:520;line-height:1}
+@media(max-width:430px){
+  .correct-action-dialog{width:calc(100% - 26px);border-radius:30px}
+  .correct-action-shell{padding:28px 20px 24px}
+  .correct-action-title{margin-bottom:24px}
+  .correct-action-options{gap:12px}
+  .correct-action-option{min-height:160px;padding:16px 8px;gap:16px}
+  .correct-action-option svg{width:64px;height:64px}
+  .correct-action-option span{font-size:21px}
+}

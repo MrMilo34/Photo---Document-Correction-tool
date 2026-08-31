@@ -1,4 +1,4 @@
-const CACHE = 'meshdoctor-v1.6.36';
+const CACHE = 'meshdoctor-v1.6.43';
 const CORE = [
   './',
   './index.html',

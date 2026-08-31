@@ -1,4 +1,18 @@
-# MeshDoctor v1.6.41
+# MeshDoctor v1.6.43
+
+## v1.6.43 Output naming standard
+- Adds independent PDF, Image, and Label default/next-name settings.
+- Defaults: MeshDR-PDF 01, MeshDR-Image 01, MeshDR-Label 01.
+- Each output family automatically advances its own counter after saving.
+- Normal Correct Image and Side by Side outputs now use the Image counter instead of the source filename.
+
+
+## v1.6.43 Correct Image action chooser
+
+- **Correct Image** now opens a dedicated two-action chooser: **Camera** or **Gallery**.
+- **Camera** launches the existing direct camera capture flow.
+- **Gallery** launches the existing image picker flow.
+- **Side by Side**, Label Maker, PDF creation, and the existing image correction pipeline are unchanged.
 
 ## v1.6.41 home refinement + Side by Side
 
