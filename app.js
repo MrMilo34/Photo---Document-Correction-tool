@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const views = { home: $('homeView'), label: $('labelView'), labelArea: $('labelAreaView'), labelResult: $('labelResultView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
+const views = { home: $('homeView'), side: $('sideBySideView'), label: $('labelView'), labelArea: $('labelAreaView'), labelResult: $('labelResultView'), pdf: $('pdfView'), shape: $('shapeView'), result: $('resultView') };
 const editCanvas = $('editCanvas'), ectx = editCanvas.getContext('2d', { willReadFrequently: true });
 const resultCanvas = $('resultCanvas'), rctx = resultCanvas.getContext('2d', { willReadFrequently: true });
 const loupe = $('loupe'), loupeCanvas = $('loupeCanvas'), lctx = loupeCanvas.getContext('2d');
@@ -23,6 +23,15 @@ let pdfEditingId = null;
 let pdfUid = 0;
 let pdfDrag = null;
 let pdfSuppressClickUntil = 0;
+
+// Side by Side state
+let sideItems=[];
+let sideUid=0;
+let sideSelectedId=null;
+let sideDrag=null;
+let sideSuppressClickUntil=0;
+let sideLayout='horizontal';
+let sideEditorMode=false;
 const SETTINGS_KEY = 'meshdoctor-settings-v1';
 const LABEL_NAME_COUNTER_KEY = 'meshdoctor-label-counter-v1';
 const LABEL_PROJECT_META_KEY = 'meshdoctor-last-label-project-meta-v1';
@@ -452,14 +461,15 @@ function showView(name){
   views[name].classList.add('active');
   document.body.classList.toggle('result-mode', name==='result');
   document.body.classList.toggle('home-mode', name==='home');
-  document.body.classList.toggle('pdf-mode', name==='pdf');
-  document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf'||name==='label');
+  document.body.classList.toggle('pdf-mode', name==='pdf'||name==='side');
+  document.body.classList.toggle('ambient-mode', name==='home'||name==='pdf'||name==='label'||name==='side');
   views.shape.classList.toggle('label-mesh-mode', false);
   if(name!=='shape') hidePointActions();
-  if(name==='home'||name==='pdf'||name==='label') startHomeCameraBg();
+  if(name==='home'||name==='pdf'||name==='label'||name==='side') startHomeCameraBg();
   else stopHomeCameraBg();
   if(name==='result') updateResultActions();
   if(name==='pdf') renderPdfBuilder();
+  if(name==='side') renderSideBuilder();
   if(name==='label') renderLabelBuilder();
   if(name==='shape') updateMeshMoveAllPosition();
   window.scrollTo(0,0);
@@ -471,6 +481,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 async function loadFile(file, options={}){
   if(!file) return;
   if(!options.preserveLabelEditor) labelEditorMode=false;
+  if(!options.preserveSideEditor) sideEditorMode=false;
   clearAiReference(true);
   pdfEditingId = options.pdfItemId || null;
   currentFileBase = (file.name || 'image').replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]+/gi,'_') || 'image';
@@ -1449,6 +1460,67 @@ function updateResultActions(){
   save.textContent=pdfEditingId?'Save & Continue':'Save PNG';
   save.setAttribute('aria-label',pdfEditingId?'Save edited page and return to PDF builder':(labelEditorMode?'Save stitched label PNG':'Save PNG'));
   if(labelEditorMode){const name=$('imageOutputName');if(name&&!name.value)name.value=getDefaultLabelName();}
+}
+
+function sideItemById(id){ return sideItems.find(x=>x.id===id); }
+function makeSideItem(file){
+  return {id:`SIDE-${Date.now().toString(36)}-${(++sideUid).toString(36)}`,name:file.name||`Image-${sideUid}.jpg`,blob:file,url:URL.createObjectURL(file)};
+}
+function revokeSideItem(item){if(item?.url)try{URL.revokeObjectURL(item.url);}catch{}}
+function moveSideItem(from,to){if(from===to||from<0||to<0||from>=sideItems.length||to>=sideItems.length)return;const [item]=sideItems.splice(from,1);sideItems.splice(to,0,item);}
+function clearSideDropTargets(){document.querySelectorAll('.side-image-list .pdf-item.drop-target').forEach(el=>el.classList.remove('drop-target'));}
+function bindSideDrag(handle,tile,itemId){
+  handle.addEventListener('click',e=>e.stopPropagation());
+  handle.addEventListener('pointerdown',ev=>{
+    if(ev.button!=null&&ev.button!==0)return;const from=sideItems.findIndex(x=>x.id===itemId);if(from<0)return;
+    sideDrag={itemId,from,targetId:itemId,startX:ev.clientX,startY:ev.clientY,moved:false,pointerId:ev.pointerId};tile.classList.add('dragging');
+    try{handle.setPointerCapture(ev.pointerId);}catch{}ev.preventDefault();ev.stopPropagation();
+  });
+  handle.addEventListener('pointermove',ev=>{
+    if(!sideDrag||sideDrag.pointerId!==ev.pointerId)return;if(Math.hypot(ev.clientX-sideDrag.startX,ev.clientY-sideDrag.startY)>5)sideDrag.moved=true;if(!sideDrag.moved)return;
+    const target=document.elementFromPoint(ev.clientX,ev.clientY)?.closest?.('.side-image-list .pdf-item');clearSideDropTargets();
+    if(target&&target.dataset.id!==itemId){target.classList.add('drop-target');sideDrag.targetId=target.dataset.id;}else sideDrag.targetId=itemId;ev.preventDefault();
+  });
+  const end=ev=>{if(!sideDrag||sideDrag.pointerId!==ev.pointerId)return;const drag=sideDrag;sideDrag=null;try{handle.releasePointerCapture(ev.pointerId);}catch{}clearSideDropTargets();tile.classList.remove('dragging');if(drag.moved){const to=sideItems.findIndex(x=>x.id===drag.targetId);if(to>=0&&to!==drag.from)moveSideItem(drag.from,to);sideSuppressClickUntil=Date.now()+320;renderSideBuilder();}ev.preventDefault();ev.stopPropagation();};
+  handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+}
+function setSideLayout(layout){sideLayout=layout==='vertical'?'vertical':'horizontal';$('sideHorizontalBtn')?.classList.toggle('active',sideLayout==='horizontal');$('sideVerticalBtn')?.classList.toggle('active',sideLayout==='vertical');}
+function renderSideBuilder(){
+  const list=$('sideImageList'),empty=$('sideEmpty');if(!list||!empty)return;list.innerHTML='';empty.classList.toggle('hidden',sideItems.length>0);list.classList.toggle('hidden',sideItems.length===0);
+  if(sideSelectedId&&!sideItemById(sideSelectedId))sideSelectedId=null;
+  sideItems.forEach((item,index)=>{
+    const tile=document.createElement('div');tile.className='pdf-item'+(sideSelectedId===item.id?' selected':'');tile.dataset.id=item.id;
+    const thumb=document.createElement('div');thumb.className='pdf-thumb';const img=document.createElement('img');img.src=item.url;img.alt=`Side by side image ${index+1}`;thumb.appendChild(img);
+    const pageNo=document.createElement('span');pageNo.className='pdf-page-no';pageNo.textContent=String(index+1);thumb.appendChild(pageNo);
+    const handle=document.createElement('button');handle.type='button';handle.className='pdf-drag-handle';handle.innerHTML='<svg class="move-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';handle.setAttribute('aria-label',`Move image ${index+1}`);thumb.appendChild(handle);
+    const actions=document.createElement('div');actions.className='pdf-tile-actions';const remove=document.createElement('button');remove.type='button';remove.className='pdf-remove-item';remove.textContent='✕ Remove';actions.append(remove);thumb.appendChild(actions);tile.appendChild(thumb);
+    const name=document.createElement('div');name.className='pdf-name';name.textContent=item.name;tile.appendChild(name);
+    tile.addEventListener('click',()=>{if(Date.now()<sideSuppressClickUntil)return;sideSelectedId=sideSelectedId===item.id?null:item.id;renderSideBuilder();});
+    remove.addEventListener('click',ev=>{ev.stopPropagation();const i=sideItems.findIndex(x=>x.id===item.id);if(i>=0){revokeSideItem(sideItems[i]);sideItems.splice(i,1);if(sideSelectedId===item.id)sideSelectedId=null;renderSideBuilder();}});
+    bindSideDrag(handle,tile,item.id);list.appendChild(tile);
+  });
+  setSideLayout(sideLayout);const assemble=$('sideAssembleBtn');if(assemble)assemble.disabled=sideItems.length<2;
+}
+function addSideImages(files){const images=[...files].filter(f=>f.type?.startsWith('image/'));if(!images.length){toast('Choose two or more images.');return;}sideItems.push(...images.map(makeSideItem));sideSelectedId=null;renderSideBuilder();}
+async function assembleSideBySide(){
+  if(sideItems.length<2){toast('Choose at least two images.');return;}
+  busy(true,'Preparing side by side images…');
+  const bitmaps=[];
+  try{
+    for(let i=0;i<sideItems.length;i++){ $('busyText').textContent=`Preparing image · ${i+1}/${sideItems.length}`;const bmp=await createImageBitmap(sideItems[i].blob);bitmaps.push(bmp);await new Promise(r=>setTimeout(r,0)); }
+    const horizontal=sideLayout!=='vertical';
+    const crossValues=bitmaps.map(b=>horizontal?b.height:b.width).sort((a,b)=>a-b);
+    const median=crossValues[Math.floor(crossValues.length/2)]||crossValues[0]||1200;
+    let cross=Math.max(64,Math.min(2400,median));
+    let dims=bitmaps.map(b=>horizontal?{w:b.width*(cross/b.height),h:cross}:{w:cross,h:b.height*(cross/b.width)});
+    let long=dims.reduce((sum,d)=>sum+(horizontal?d.w:d.h),0),maxLong=12000;
+    if(long>maxLong){const scale=maxLong/long;cross*=scale;dims=bitmaps.map(b=>horizontal?{w:b.width*(cross/b.height),h:cross}:{w:cross,h:b.height*(cross/b.width)});long=maxLong;}
+    const out=document.createElement('canvas');out.width=Math.max(1,Math.round(horizontal?dims.reduce((s,d)=>s+d.w,0):cross));out.height=Math.max(1,Math.round(horizontal?cross:dims.reduce((s,d)=>s+d.h,0)));
+    const ctx=out.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,out.width,out.height);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    let offset=0;for(let i=0;i<bitmaps.length;i++){const d=dims[i],dw=Math.max(1,Math.round(d.w)),dh=Math.max(1,Math.round(d.h));if(horizontal){ctx.drawImage(bitmaps[i],Math.round(offset),0,dw,out.height);offset+=d.w;}else{ctx.drawImage(bitmaps[i],0,Math.round(offset),out.width,dh);offset+=d.h;}}
+    sourceCanvas.width=out.width;sourceCanvas.height=out.height;sctx.clearRect(0,0,out.width,out.height);sctx.drawImage(out,0,0);setupEditCanvas();points=[{x:1,y:1,corner:0},{x:Math.max(1,out.width-2),y:1,corner:1},{x:Math.max(1,out.width-2),y:Math.max(1,out.height-2),corner:2},{x:1,y:Math.max(1,out.height-2),corner:3}];history=[];selectedIndex=-1;resetViewport();correctedOriginal=null;correctedImage=null;aiAssistImage=null;adjustedImage=null;grayscaleImageCache=null;aiRestoreChoice=null;currentMode='adjust';resetAdjustments(false);currentFileBase='MeshDoctor-side-by-side';labelEditorMode=false;pdfEditingId=null;sideEditorMode=true;renderEditor();showView('shape');toast('Images assembled edge-to-edge. Continue with normal correction.');
+  }catch(err){console.error(err);toast('Could not assemble those images.');}
+  finally{bitmaps.forEach(b=>b?.close?.());busy(false);}
 }
 
 function pdfItemById(id){ return pdfItems.find(x=>x.id===id); }
@@ -3149,8 +3221,15 @@ $('settingsSaveBtn')?.addEventListener('click',()=>{
 });
 $('settingsDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeSettingsDialog();});
 
-$('cameraInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
-$('galleryInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+$('correctImageInput')?.addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+$('sideBySideBtn')?.addEventListener('click',()=>{labelEditorMode=false;pdfEditingId=null;sideEditorMode=false;clearAiReference(true);showView('side');if(!sideItems.length)$('sideImageInput')?.click();});
+$('sideBackBtn')?.addEventListener('click',()=>{sideEditorMode=false;showView('home');});
+$('sideAddBtn')?.addEventListener('click',()=>$('sideImageInput')?.click());
+$('sideEmptyAddBtn')?.addEventListener('click',()=>$('sideImageInput')?.click());
+$('sideImageInput')?.addEventListener('change',e=>{addSideImages(e.target.files||[]);e.target.value='';});
+$('sideHorizontalBtn')?.addEventListener('click',()=>setSideLayout('horizontal'));
+$('sideVerticalBtn')?.addEventListener('click',()=>setSideLayout('vertical'));
+$('sideAssembleBtn')?.addEventListener('click',assembleSideBySide);
 $('aiReferenceInput')?.addEventListener('change',async e=>{
   const file=e.target.files?.[0];
   e.target.value='';
@@ -3170,8 +3249,8 @@ $('aiReferenceInput')?.addEventListener('change',async e=>{
   }finally{busy(false);}
 });
 $('aiReferenceClearBtn')?.addEventListener('click',()=>clearAiReference());
-$('pdfBuilderBtn').addEventListener('click',()=>{labelEditorMode=false;pdfEditingId=null;showView('pdf');});
-$('labelMakerBtn').addEventListener('click',()=>{labelEditorMode=false;clearAiReference(true);showView('label');updateLabelRestoreUi();renderLabelBuilder();});
+$('pdfBuilderBtn').addEventListener('click',()=>{labelEditorMode=false;sideEditorMode=false;pdfEditingId=null;showView('pdf');});
+$('labelMakerBtn').addEventListener('click',()=>{labelEditorMode=false;sideEditorMode=false;clearAiReference(true);showView('label');updateLabelRestoreUi();renderLabelBuilder();});
 $('labelBackBtn').addEventListener('click',()=>{labelEditorMode=false;showView('home');});
 $('labelAddBtn')?.addEventListener('click',openLabelAddDialog);
 $('labelEmptyAddBtn')?.addEventListener('click',openLabelAddDialog);
@@ -3258,9 +3337,9 @@ function burstCorrectButton(ev){
   }
 }
 $('correctBtn').addEventListener('pointerdown',burstCorrectButton);$('correctBtn').addEventListener('click',runCorrection);
-$('shapeBackBtn').addEventListener('click',async()=>{if(labelEditorMode){showView('label');renderLabelBuilder();}else if(pdfEditingId){pdfEditingId=null;showView('pdf');}else showView('home');});
+$('shapeBackBtn').addEventListener('click',async()=>{if(labelEditorMode){showView('label');renderLabelBuilder();}else if(pdfEditingId){pdfEditingId=null;showView('pdf');}else if(sideEditorMode){showView('side');renderSideBuilder();}else showView('home');});
 $('headerBackBtn').addEventListener('click',()=>{showView('shape');renderEditor();});
-$('resultHomeBtn').addEventListener('click',()=>{pdfEditingId=null;labelEditorMode=false;showView('home');});
+$('resultHomeBtn').addEventListener('click',()=>{pdfEditingId=null;labelEditorMode=false;sideEditorMode=false;showView('home');});
 $('adjustModeBtn').addEventListener('click',()=>setMode('adjust'));
 $('bwModeBtn').addEventListener('click',()=>setMode('bw'));
 $('correctedModeBtn').addEventListener('click',()=>setMode('corrected'));

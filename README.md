@@ -1,4 +1,13 @@
-# MeshDoctor v1.6.40
+# MeshDoctor v1.6.41
+
+## v1.6.41 home refinement + Side by Side
+
+- Home screen now starts with **Correct Image** instead of separate Take Photo / Choose Photo buttons. On Android, the single image input hands source selection to the system Camera/Gallery chooser.
+- Added **Side by Side** as the second main option.
+- Side by Side accepts multiple gallery images, supports drag reordering, and lets the user choose **Horizontal** or **Vertical** assembly.
+- Assembly is deliberately non-stitched: no overlap matching, seam blur, or morphing. Images are normalized on the cross-axis, preserve aspect ratio, and are placed edge-to-edge in the chosen order.
+- The assembled composite continues through the normal MeshDoctor correction page and final image naming/save flow.
+
 
 ## v1.6.40 text tracking, Pass 2 and wide AI fix
 
