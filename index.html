@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.6.33" />
-  <link rel="icon" href="icons/icon-192.png?v=1.6.33" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.33" />
-  <link rel="stylesheet" href="styles.css?v=1.6.33" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.35" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.35" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.35" />
+  <link rel="stylesheet" href="styles.css?v=1.6.35" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.6.33" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.35" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.6.33</div>
+      <div class="version-tag">release v1.6.35</div>
 
       <div class="home-actions">
         <label class="primary big-btn neon-action">📷 Take Photo
@@ -283,11 +283,11 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.6.33</h2>
+    <h2>MeshDoctor v1.6.35</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.33:</strong> keeps the hybrid live-plus-HQ label workflow, makes the Label Maker capture box narrower by default to favor a cleaner central tracking slice, and adds an HQ watchdog so a new detailed frame is taken when the live scan has clearly advanced even if the Alignment percentage stalls.</p>
+    <p><strong>v1.6.35:</strong> adds an optional Extra Passes mode for Label Maker. After one full rotation is found, you can keep rotating for one or more refinement passes. MeshDoctor keeps the first loop as the authoritative circumference, wraps later HQ frames back onto that same label, and prefers the sharper/cleaner duplicate view for each region before final cleanup.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -341,6 +341,7 @@
       <div class="label-camera-toolbar">
         <label class="label-camera-chip"><input id="labelCameraMirrorToggle" type="checkbox" checked /> Symmetric Width</label>
         <label class="label-camera-chip"><input id="labelCameraAutoToggle" type="checkbox" checked /> Auto Capture</label>
+        <label class="label-camera-chip"><input id="labelCameraRefineToggle" type="checkbox" /> Extra Passes</label>
         <button id="labelCameraResetGuideBtn" class="label-camera-chip action" type="button">Reset Guide</button>
       </div>
       <div class="label-camera-control-row">
@@ -360,8 +361,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.6.33"></script>
+  <script src="config.js?v=1.6.35"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.6.33"></script>
+  <script src="app.js?v=1.6.35"></script>
 </body>
 </html>

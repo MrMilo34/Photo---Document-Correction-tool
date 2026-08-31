@@ -1,14 +1,14 @@
-const CACHE = 'meshdoctor-v1.6.33';
+const CACHE = 'meshdoctor-v1.6.35';
 const CORE = [
   './',
   './index.html',
-  './styles.css?v=1.6.33',
-  './app.js?v=1.6.33',
-  './config.js?v=1.6.33',
-  './manifest.webmanifest?v=1.6.33',
-  './icons/icon-192.png?v=1.6.33',
-  './icons/icon-512.png?v=1.6.33',
-  './assets/home-splash.png?v=1.6.33'
+  './styles.css?v=1.6.35',
+  './app.js?v=1.6.35',
+  './config.js?v=1.6.35',
+  './manifest.webmanifest?v=1.6.35',
+  './icons/icon-192.png?v=1.6.35',
+  './icons/icon-512.png?v=1.6.35',
+  './assets/home-splash.png?v=1.6.35'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(()=>self.skipWaiting()));
