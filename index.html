@@ -287,7 +287,7 @@
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.35:</strong> adds an optional Extra Passes mode for Label Maker. After one full rotation is found, you can keep rotating for one or more refinement passes. MeshDoctor keeps the first loop as the authoritative circumference, wraps later HQ frames back onto that same label, and prefers the sharper/cleaner duplicate view for each region before final cleanup.</p>
+    <p><strong>v1.6.35:</strong> hardens live Label Maker tracking around dense/repeating text, rejects implausible tracking jumps, freezes the ghost to the last accepted HQ capture only, pauses live tracking during the HQ shutter, and builds final panorama pixels/placement primarily from the accepted HQ keyframes instead of trusting a corrupted live map.</p>
     <button id="closeAboutBtn" class="primary">Got it</button>
   </dialog>
 
@@ -341,7 +341,6 @@
       <div class="label-camera-toolbar">
         <label class="label-camera-chip"><input id="labelCameraMirrorToggle" type="checkbox" checked /> Symmetric Width</label>
         <label class="label-camera-chip"><input id="labelCameraAutoToggle" type="checkbox" checked /> Auto Capture</label>
-        <label class="label-camera-chip"><input id="labelCameraRefineToggle" type="checkbox" /> Extra Passes</label>
         <button id="labelCameraResetGuideBtn" class="label-camera-chip action" type="button">Reset Guide</button>
       </div>
       <div class="label-camera-control-row">
