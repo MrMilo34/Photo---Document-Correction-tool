@@ -1734,8 +1734,8 @@ function defaultLabelCameraGuideState(){
     mirror:true,
     auto:true,
     points:{
-      top:[{x:0,y:.18},{x:.25,y:.18},{x:.5,y:.18},{x:.75,y:.18},{x:1,y:.18}],
-      bottom:[{x:0,y:.82},{x:.25,y:.82},{x:.5,y:.82},{x:.75,y:.82},{x:1,y:.82}]
+      top:[{x:.18,y:.18},{x:.34,y:.18},{x:.5,y:.18},{x:.66,y:.18},{x:.82,y:.18}],
+      bottom:[{x:.18,y:.82},{x:.34,y:.82},{x:.5,y:.82},{x:.66,y:.82},{x:.82,y:.82}]
     },
     prevStrip:null,
     currentStrip:null,
@@ -1772,7 +1772,7 @@ function defaultLabelCameraGuideState(){
     scoreDropFrames:0,
     liveAddsSinceCapture:0,
     guideLocked:false,
-    instruction:'Frame one clear section, take the first shot, then rotate slowly. MeshDoctor will recognize the label and extend it as you move.'
+    instruction:'Take the first shot, then rotate slowly. MeshDoctor now prefers a narrower central tracking area and can force an HQ capture if the live scan has clearly advanced.'
   };
 }
 function syncLabelCameraMirror(){
@@ -1973,7 +1973,7 @@ function appendLabelCameraLivePixels(frame,est){
   const locked=!!s.previewDirection,narrow=!!frame.narrow;
   const identity=labelCameraFrameIdentityScore(s.previewAnchor,frame);
   const staticCutoff=narrow?.982:.976;
-  // v1.6.32: a nearly identical frame is NOT motion. Do not paint it into the
+  // v1.6.33: a nearly identical frame is NOT motion. Do not paint it into the
   // panorama and, critically, do not let 1-2 px of camera noise accumulate toward
   // another automatic HQ photograph. Keep the anchor fixed so genuine slow rotation
   // eventually moves far enough away from it to be accepted.
@@ -2207,7 +2207,16 @@ function tickLabelCamera(now=performance.now()){
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
         const ready=!st.loopHint&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
-        if(st.auto&&ready&&now-st.lastCaptureAt>(narrow?1650:1200)&&!labelCameraWorking){
+        // v1.6.33: HQ watchdog. If the live panorama has clearly advanced for a while
+        // but the classic alignment gate never fully opens, still request another HQ
+        // keyframe once we have enough genuinely new live coverage and a stable frame.
+        const watchdogDistance=Math.max(narrow?Math.round(motion.frameWidth*.72):Math.round(motion.frameWidth*.66),captureDistance*.78);
+        const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?7:6);
+        const watchdogCoverage=st.previewAdvance>=watchdogDistance||watchdogAdds;
+        const watchdogStable=motion.score>=(narrow?.49:.50)&&referenceIdentity<(narrow?.935:.958);
+        const watchdogReady=!st.loopHint&&changedEnough&&watchdogCoverage&&watchdogStable;
+        const normalCooldown=narrow?1650:1200,watchdogCooldown=narrow?2400:1900;
+        if(st.auto&&!labelCameraWorking&&((ready&&now-st.lastCaptureAt>normalCooldown)||(watchdogReady&&now-st.lastCaptureAt>watchdogCooldown))){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
         st.previousScore=motion.score;updateLabelCameraUi();
@@ -2965,4 +2974,4 @@ window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSetti
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.32', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.33', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
