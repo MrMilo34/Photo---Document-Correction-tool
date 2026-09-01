@@ -1905,6 +1905,7 @@ function defaultLabelCameraGuideState(){
     previewAnchor:null,
     firstPreviewFrame:null,
     firstHqReferenceFrame:null,
+    firstLoopLiveReferenceFrame:null,
     loopStartSequence:[],
     previewDirection:null,
     previewAdvance:0,
@@ -2310,7 +2311,7 @@ function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.loopStartSequence=[frame];s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];s.scanPass=1;s.pass1Complete=false;s.pass2Complete=false;s.passTransitionUntil=0;s.pass1Map=null;s.pass1MapWidth=0;s.pass1MapHeight=0;s.pass1PreviewStart=0;s.pass1PreviewEnd=0;s.pass2StartReference=null;s.pass2Travel=0;s.pass2MapX=0;s.pass2MapScore=0;s.pass2MapConfidence=0;s.pass2MatchedX=0;s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.firstLoopLiveReferenceFrame=null;s.loopStartSequence=[];s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];s.scanPass=1;s.pass1Complete=false;s.pass2Complete=false;s.passTransitionUntil=0;s.pass1Map=null;s.pass1MapWidth=0;s.pass1MapHeight=0;s.pass1PreviewStart=0;s.pass1PreviewEnd=0;s.pass2StartReference=null;s.pass2Travel=0;s.pass2MapX=0;s.pass2MapScore=0;s.pass2MapConfidence=0;s.pass2MatchedX=0;s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);renderLabelCameraPreviewUi();return frame;
 }
 
 function labelCameraSnapshotActivePreview(){
@@ -2459,7 +2460,7 @@ function appendLabelCameraLivePixels(frame,est){
   // later false-trigger on another black/white panel. A shift-tolerant correlation
   // recognizes the same physical print even when the bottle returns a little left/right.
   const usedBefore=(s.previewEndX||0)-(s.previewStartX||0);
-  const loopReference=(s.scanPass||1)===2?(s.pass2StartReference||s.firstHqReferenceFrame||s.firstPreviewFrame):(s.firstHqReferenceFrame||s.firstPreviewFrame);
+  const loopReference=(s.scanPass||1)===2?(s.pass2StartReference||s.firstLoopLiveReferenceFrame||s.firstPreviewFrame):(s.firstLoopLiveReferenceFrame||s.firstPreviewFrame);
   const passTravel=(s.scanPass||1)===2?(s.pass2Travel||usedBefore):usedBefore;
   // A full wrap must have travelled substantially before the start is allowed to match.
   // This lets us lower the visual threshold enough to survive glare/text while avoiding
@@ -2719,28 +2720,28 @@ function tickLabelCamera(now=performance.now()){
         const narrow=motion.narrow||motion.frameAspect<.68;
         const detailTrackW=motion.frameWidth*LABEL_CAMERA_DETAIL_RATIO,captureDistance=Math.max(7,detailTrackW*LABEL_CAMERA_DETAIL_STRIDE);
         st.captureProgress=clamp(st.previewAdvance/captureDistance,0,1);st.alignScore=st.captureProgress;
-        const readyScore=narrow?.55:.55;
+        const readyScore=narrow?.50:.52;
         const referenceIdentity=st.lastCaptureReferenceFrame?labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,motion.frame):0;
-        const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.920:.955);
+        const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.936:.968);
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
         const globalLayout=labelCameraCurrentGlobalLayout(),detailLayout=labelCameraDetailLayout(globalLayout),pass2Need=(st.scanPass||1)!==2||labelCameraCoverageNeedAt(detailLayout?.start||0,detailLayout?.frameWidth||detailTrackW);
         const mapConfident=(st.scanPass||1)!==2||(st.pass2MapConfidence||0)>=.34;
-        const ready=!st.loopHint&&pass2Need&&mapConfident&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
+        const ready=!st.loopHint&&pass2Need&&mapConfident&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance*.90&&motion.score>=readyScore;
         // v1.6.34: HQ watchdog. If the live panorama has clearly advanced for a while
         // but the classic alignment gate never fully opens, still request another HQ
         // keyframe once we have enough genuinely new live coverage and a stable frame.
         const watchdogDistance=Math.max(Math.round(detailTrackW*.78),captureDistance*.80);
         const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?6:5);
         const watchdogCoverage=st.previewAdvance>=watchdogDistance||watchdogAdds;
-        const watchdogStable=motion.score>=(narrow?.49:.50)&&referenceIdentity<(narrow?.935:.958);
+        const watchdogStable=motion.score>=(narrow?.46:.48)&&referenceIdentity<(narrow?.944:.972);
         const watchdogReady=!st.loopHint&&pass2Need&&mapConfident&&changedEnough&&watchdogCoverage&&watchdogStable;
         // Dense ingredients/instructions text should not starve HQ capture forever.
         // If we have clearly moved for a while without a keyframe, allow a safety
         // capture and let the map place it later.
         const starvationTravel=Math.max(captureDistance*1.25,Math.round(motion.frameWidth*(narrow?.82:.74)));
-        const starvationReady=!st.loopHint&&changedEnough&&(st.previewAdvance>=starvationTravel||(st.liveAddsSinceCapture||0)>=(narrow?9:8))&&motion.score>=(narrow?.43:.46)&&recentRealMotion;
-        const normalCooldown=narrow?1450:1050,watchdogCooldown=narrow?2100:1700,starvationCooldown=narrow?2800:2350;
+        const starvationReady=!st.loopHint&&changedEnough&&(st.previewAdvance>=starvationTravel*.92||(st.liveAddsSinceCapture||0)>=(narrow?8:7))&&motion.score>=(narrow?.41:.44)&&recentRealMotion;
+        const normalCooldown=narrow?1325:975,watchdogCooldown=narrow?1900:1550,starvationCooldown=narrow?2550:2150;
         if(st.auto&&!labelCameraWorking&&((ready&&now-st.lastCaptureAt>normalCooldown)||(watchdogReady&&now-st.lastCaptureAt>watchdogCooldown)||(starvationReady&&now-st.lastCaptureAt>starvationCooldown))){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
@@ -2827,7 +2828,7 @@ async function captureLabelCamera(fromAuto=false){
   if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
     const globalForDup=labelCameraCurrentGlobalLayout(),detailForDup=labelCameraDetailLayout(globalForDup),allowDuplicateForGap=(st?.scanPass||1)===2&&labelCameraCoverageNeedAt(detailForDup?.start||0,detailForDup?.frameWidth||trackingFrame.canvas.width*LABEL_CAMERA_DETAIL_RATIO);
     const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
-    const cutoff=trackingFrame.narrow?.928:.958;
+    const cutoff=trackingFrame.narrow?.946:.976;
     if(identity>=cutoff&&!allowDuplicateForGap){
       st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;st.liveAddsSinceCapture=0;st.stationaryFrames=(st.stationaryFrames||0)+1;updateLabelCameraUi();return;
     }
@@ -2861,9 +2862,14 @@ async function captureLabelCamera(fromAuto=false){
     try{hqTrackingFrame=await labelCameraTrackingFrameFromCapture(record,trackingFrame||st?.previewAnchor||null);}catch(err){console.warn('Could not build HQ tracking reference',err);}
     try{hqGhost=await labelCameraGhostFromCapture(record,direction==='left'?'left':'right');}catch(err){console.warn('Could not build HQ ghost reference',err);}
     if(st&&!st.firstHqReferenceFrame&&hqTrackingFrame)st.firstHqReferenceFrame=hqTrackingFrame;
-    if(st&&hqTrackingFrame&&Array.isArray(st.loopStartSequence)&&st.loopStartSequence.length<3){
+    if(st&&!st.firstLoopLiveReferenceFrame&&(trackingFrame||st.previewAnchor)){
+      st.firstLoopLiveReferenceFrame=trackingFrame||st.previewAnchor;
+      st.loopStartSequence=[st.firstLoopLiveReferenceFrame];
+    }
+    if(st&&Array.isArray(st.loopStartSequence)&&st.loopStartSequence.length<3&&(trackingFrame||st.previewAnchor)){
+      const liveRef=trackingFrame||st.previewAnchor;
       const last=st.loopStartSequence[st.loopStartSequence.length-1];
-      if(!last||labelCameraFrameIdentityScore(last,hqTrackingFrame)<.97)st.loopStartSequence.push(hqTrackingFrame);
+      if(!last||labelCameraFrameIdentityScore(last,liveRef)<.97)st.loopStartSequence.push(liveRef);
     }
     record.trackingFrame=hqTrackingFrame||null;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();

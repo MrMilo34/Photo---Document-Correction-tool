@@ -1,6 +1,6 @@
-# MeshDoctor v1.6.47
+# MeshDoctor v1.6.48
 
-## v1.6.47 Guided confidence pass
+## v1.6.48 Guided confidence pass
 - Uses a 10% context / 20% positioning / 40% HQ detail / 20% positioning / 10% context model across the blue tracking frame.
 - Full-frame zoned recognition drives map location and loop recognition; only the flatter central 40% is used as final HQ detail.
 - Pass 2 keeps Pass 1 as a fixed visible map and uses circular seam-aware matching instead of extending a second panorama.
