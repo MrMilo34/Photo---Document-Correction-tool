@@ -406,3 +406,11 @@ body.pdf-mode .pdf-save{display:block}
   .correct-action-option svg{width:64px;height:64px}
   .correct-action-option span{font-size:21px}
 }
+
+/* MeshDoctor v1.6.44 PDF source chooser */
+.pdf-action-dialog{max-width:min(760px,calc(100% - 24px))}
+.pdf-action-options{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.pdf-action-options .correct-action-option{min-width:0;padding-left:8px;padding-right:8px}
+.pdf-action-options .correct-action-option svg{width:64px;height:64px}
+.pdf-action-options .correct-action-option span{font-size:20px}
+@media(max-width:430px){.pdf-action-options{gap:7px}.pdf-action-options .correct-action-option{min-height:138px;padding:12px 4px;gap:12px}.pdf-action-options .correct-action-option svg{width:50px;height:50px}.pdf-action-options .correct-action-option span{font-size:16px}}

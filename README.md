@@ -1,4 +1,13 @@
-# MeshDoctor v1.6.43
+# MeshDoctor v1.6.44
+
+## v1.6.44 Folder-aware output naming + PDF source chooser
+- PDF, Image, and Label defaults are editable base-name families rather than fixed internal counters.
+- Settings displays the next available numbered name by scanning the selected `MeshDoctor/PDFs` or `MeshDoctor/Images` folder.
+- Example: files through `PDFs Tester 03.pdf` make the next default `PDFs Tester 04`; a brand-new `PDFs Tester` family starts at `01`.
+- Saving with the displayed default name into the selected output folder refreshes the sequence from disk. Saving with a different export name or falling back outside the selected folder does not advance the default family.
+- Existing matching filenames are never intentionally overwritten; the folder scan selects the next safe number.
+- Create a PDF now opens a dedicated Camera / Gallery / PDF chooser.
+
 
 ## v1.6.43 Output naming standard
 - Adds independent PDF, Image, and Label default/next-name settings.

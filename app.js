@@ -167,15 +167,45 @@ function parseNumberedOutputSetting(value,fallbackPrefix,currentCounter=1){
 function getDefaultPdfName(){return numberedOutputName(userSettings.pdfFilename||'MeshDR-PDF',pdfNameCounter);}
 function getDefaultImageName(){return numberedOutputName(userSettings.imageFilename||'MeshDR-Image',imageNameCounter);}
 function getDefaultLabelName(){return numberedOutputName(userSettings.labelFilename||'MeshDR-Label',labelNameCounter);}
-function advancePdfNameCounter(){pdfNameCounter+=1;saveOutputNameCounter('pdf');syncSettingsUi();}
-function advanceImageNameCounter(){
-  imageNameCounter+=1;saveOutputNameCounter('image');
-  if(!labelEditorMode&&!pdfEditingId){currentFileBase=getDefaultImageName();syncImageOutputName();}
-  syncSettingsUi();
+function outputNameInfo(type){
+  if(type==='pdf')return {prefix:userSettings.pdfFilename||'MeshDR-PDF',kind:'PDFs',extensions:['pdf']};
+  if(type==='label')return {prefix:userSettings.labelFilename||'MeshDR-Label',kind:'Images',extensions:['png','jpg','jpeg','webp']};
+  return {prefix:userSettings.imageFilename||'MeshDR-Image',kind:'Images',extensions:['png','jpg','jpeg','webp']};
 }
-function advanceLabelNameCounter(){
-  labelNameCounter+=1;saveOutputNameCounter('label');
-  if(labelEditorMode){currentFileBase=getDefaultLabelName();syncImageOutputName();}
+function setOutputCounter(type,value){
+  const next=Math.max(1,Math.floor(Number(value)||1));
+  if(type==='pdf')pdfNameCounter=next;else if(type==='label')labelNameCounter=next;else imageNameCounter=next;
+  saveOutputNameCounter(type);
+}
+function getOutputCounter(type){return type==='pdf'?pdfNameCounter:type==='label'?labelNameCounter:imageNameCounter;}
+function escapeRegexText(value){return String(value||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+async function scanNextOutputCounter(type,{ask=false}={}){
+  const info=outputNameInfo(type);
+  const dir=await getOutputSubdirectory(info.kind,ask);
+  if(!dir)return getOutputCounter(type);
+  let highest=0;
+  const pattern=new RegExp(`^${escapeRegexText(sanitizeFileName(info.prefix,'MeshDR'))}\\s+(\\d+)\\.(${info.extensions.join('|')})$`,'i');
+  try{
+    for await(const [name,handle] of dir.entries()){
+      if(handle?.kind!=='file')continue;
+      const match=String(name||'').match(pattern);if(!match)continue;
+      highest=Math.max(highest,Number(match[1])||0);
+    }
+    setOutputCounter(type,highest+1);
+  }catch(err){console.warn(`Could not scan ${type} output names`,err);}
+  return getOutputCounter(type);
+}
+async function refreshAllOutputCounters({ask=false}={}){
+  if(!outputDirHandle)return;
+  await scanNextOutputCounter('pdf',{ask});
+  await scanNextOutputCounter('image',{ask});
+  await scanNextOutputCounter('label',{ask});
+}
+async function refreshCounterAfterDefaultSave(type,usedDefault,savedToSelectedFolder){
+  if(!usedDefault||!savedToSelectedFolder)return;
+  await scanNextOutputCounter(type,{ask:false});
+  if(type==='image'&&!labelEditorMode&&!pdfEditingId){currentFileBase=getDefaultImageName();syncImageOutputName();}
+  if(type==='label'&&labelEditorMode){currentFileBase=getDefaultLabelName();syncImageOutputName();}
   syncSettingsUi();
 }
 function syncSettingsUi(){
@@ -297,7 +327,7 @@ async function chooseOutputFolder(){
     const md=await handle.getDirectoryHandle('MeshDoctor',{create:true});
     await md.getDirectoryHandle('Images',{create:true});
     await md.getDirectoryHandle('PDFs',{create:true});
-    outputDirHandle=handle;userSettings.outputFolderName=handle.name||'Selected folder';saveSettings();await rememberOutputHandle(handle);updateOutputFolderUi();toast('MeshDoctor output folders are ready.');
+    outputDirHandle=handle;userSettings.outputFolderName=handle.name||'Selected folder';saveSettings();await rememberOutputHandle(handle);await refreshAllOutputCounters({ask:false});syncSettingsUi();toast('MeshDoctor output folders are ready.');
   }catch(err){if(err?.name!=='AbortError'){console.warn(err);toast('Could not use that output folder.');}}
 }
 async function getOutputSubdirectory(kind,ask=false){
@@ -322,7 +352,7 @@ function getImageOutputBase(){
 }
 function syncImageOutputName(){const input=$('imageOutputName');if(input)input.value=sanitizeFileName(currentFileBase||'image','image');}
 
-function openSettingsDialog(){ syncSettingsUi(); renderAiDiagnostics(); $('settingsDialog')?.showModal(); testAiConnection(); }
+async function openSettingsDialog(){ syncSettingsUi(); renderAiDiagnostics(); $('settingsDialog')?.showModal(); testAiConnection(); if(outputDirHandle){await refreshAllOutputCounters({ask:false});syncSettingsUi();} }
 function closeSettingsDialog(){ if($('settingsDialog')?.open) $('settingsDialog').close(); }
 function sanitizeFileName(name,fallback='MeshDoctor-created'){
   const cleaned=String(name||'').replace(/[\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
@@ -3210,12 +3240,13 @@ function promptFileName({title='Name your file',help='Choose the name used when 
   const dlg=$('fileNameDialog');if(!dlg)return Promise.resolve(sanitizeFileName(defaultName,'MeshDoctor-file'));$('fileNameTitle').textContent=title;$('fileNameHelp').textContent=help;$('fileNameInput').value=sanitizeFileName(defaultName,'MeshDoctor-file');$('fileNameExtension').textContent=extension;if(!dlg.open)dlg.showModal();setTimeout(()=>$('fileNameInput')?.select(),40);return new Promise(resolve=>{fileNameResolve=resolve;});
 }
 function closeFileNameDialog(value=null){if($('fileNameDialog')?.open)$('fileNameDialog').close();const resolve=fileNameResolve;fileNameResolve=null;if(resolve)resolve(value);}
-async function requestPdfSave(){if(!pdfItems.length){toast('Add pages first.');return;}const name=await promptFileName({title:'Name your PDF',help:'Choose the filename for this PDF.',defaultName:getDefaultPdfName(),extension:'.pdf'});if(!name)return;const saved=await savePdf(name);if(saved)advancePdfNameCounter();}
-async function saveLabelResult(){if(!labelResultImage)return;const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:getDefaultLabelName(),extension:'.png'});if(!name)return;const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob){await saveBlobToOutput(blob,`${name}.png`,'Images');advanceLabelNameCounter();}}
+async function requestPdfSave(){if(!pdfItems.length){toast('Add pages first.');return;}const expected=getDefaultPdfName();const name=await promptFileName({title:'Name your PDF',help:'Choose the filename for this PDF.',defaultName:expected,extension:'.pdf'});if(!name)return;const usedDefault=sanitizeFileName(name,'')===sanitizeFileName(expected,'');const result=await savePdf(name);if(result?.ok)await refreshCounterAfterDefaultSave('pdf',usedDefault,result.savedToSelectedFolder);}
+async function saveLabelResult(){if(!labelResultImage)return;const expected=getDefaultLabelName();const name=await promptFileName({title:'Name your label',help:'Choose the filename for this stitched label image.',defaultName:expected,extension:'.png'});if(!name)return;const usedDefault=sanitizeFileName(name,'')===sanitizeFileName(expected,'');const c=$('labelResultCanvas'),blob=await canvasBlob(c,'image/png');if(blob){const savedToSelectedFolder=await saveBlobToOutput(blob,`${name}.png`,'Images');await refreshCounterAfterDefaultSave('label',usedDefault,savedToSelectedFolder);}}
 async function saveLabelEditorResult(){
   const fallback=getDefaultLabelName();
   const name=sanitizeFileName($('imageOutputName')?.value||fallback,fallback);
-  const blob=await canvasBlob(resultCanvas,'image/png');if(blob){await saveBlobToOutput(blob,`${name}.png`,'Images');advanceLabelNameCounter();}
+  const usedDefault=name===sanitizeFileName(fallback,fallback);
+  const blob=await canvasBlob(resultCanvas,'image/png');if(blob){const savedToSelectedFolder=await saveBlobToOutput(blob,`${name}.png`,'Images');await refreshCounterAfterDefaultSave('label',usedDefault,savedToSelectedFolder);}
 }
 
 async function savePdf(baseName=getDefaultPdfName()){
@@ -3226,14 +3257,15 @@ async function savePdf(baseName=getDefaultPdfName()){
     for(let i=0;i<pdfItems.length;i++){$('busyText').textContent=`Building PDF · ${i+1}/${pdfItems.length}`;pages.push(await pdfPageImage(pdfItems[i]));await new Promise(r=>setTimeout(r,0));}
     const pdf=buildImagePdf(pages);
     const fileName=`${sanitizeFileName(baseName||getDefaultPdfName(),'MeshDR-PDF 01')}.pdf`;
-    await saveBlobToOutput(pdf,fileName,'PDFs');
-    return true;
+    const savedToSelectedFolder=await saveBlobToOutput(pdf,fileName,'PDFs');
+    return {ok:true,savedToSelectedFolder};
   }catch(err){console.error(err);toast('Could not build the PDF.');return false;}
   finally{busy(false);}
 }
 
 function downloadCanvas(type='image/png'){
-  resultCanvas.toBlob(async blob=>{if(!blob)return;const ext=type==='image/png'?'png':'jpg';const fileName=`${getImageOutputBase()}.${ext}`;await saveBlobToOutput(blob,fileName,'Images');advanceImageNameCounter();},type,type==='image/jpeg'?.94:undefined);
+  const expected=getDefaultImageName();
+  resultCanvas.toBlob(async blob=>{if(!blob)return;const ext=type==='image/png'?'png':'jpg',base=getImageOutputBase(),fileName=`${base}.${ext}`;const usedDefault=sanitizeFileName(base,'')===sanitizeFileName(expected,'');const savedToSelectedFolder=await saveBlobToOutput(blob,fileName,'Images');await refreshCounterAfterDefaultSave('image',usedDefault,savedToSelectedFolder);},type,type==='image/jpeg'?.94:undefined);
 }
 async function shareCanvas(){
   resultCanvas.toBlob(async blob=>{if(!blob)return;const file=new File([blob],`${getImageOutputBase()}.png`,{type:'image/png'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'MeshDoctor corrected image'});}else{downloadCanvas('image/png');}}catch(e){if(e.name!=='AbortError')toast('Share was not available.');}},'image/png');
@@ -3244,17 +3276,18 @@ $('testAiConnectionBtn')?.addEventListener('click',testAiConnection);
 $('chooseOutputFolderBtn')?.addEventListener('click',chooseOutputFolder);
 $('settingsCloseBtn')?.addEventListener('click',closeSettingsDialog);
 $('settingsCancelBtn')?.addEventListener('click',closeSettingsDialog);
-$('settingsSaveBtn')?.addEventListener('click',()=>{
-  const pdf=parseNumberedOutputSetting($('settingsPdfName')?.value,'MeshDR-PDF',pdfNameCounter);
-  const image=parseNumberedOutputSetting($('settingsImageName')?.value,'MeshDR-Image',imageNameCounter);
-  const label=parseNumberedOutputSetting($('settingsLabelName')?.value,'MeshDR-Label',labelNameCounter);
-  userSettings.pdfFilename=pdf.prefix;pdfNameCounter=pdf.counter;
-  userSettings.imageFilename=image.prefix;imageNameCounter=image.counter;
-  userSettings.labelFilename=label.prefix;labelNameCounter=label.counter;
-  saveSettings();saveOutputNameCounter('pdf');saveOutputNameCounter('image');saveOutputNameCounter('label');
+$('settingsSaveBtn')?.addEventListener('click',async()=>{
+  const pdf=parseNumberedOutputSetting($('settingsPdfName')?.value,'MeshDR-PDF',1);
+  const image=parseNumberedOutputSetting($('settingsImageName')?.value,'MeshDR-Image',1);
+  const label=parseNumberedOutputSetting($('settingsLabelName')?.value,'MeshDR-Label',1);
+  userSettings.pdfFilename=pdf.prefix;setOutputCounter('pdf',pdf.counter);
+  userSettings.imageFilename=image.prefix;setOutputCounter('image',image.counter);
+  userSettings.labelFilename=label.prefix;setOutputCounter('label',label.counter);
+  saveSettings();
+  if(outputDirHandle)await refreshAllOutputCounters({ask:false});
   syncSettingsUi();
   closeSettingsDialog();
-  toast('Settings saved.');
+  toast('Default output names saved.');
 });
 $('settingsDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeSettingsDialog();});
 
@@ -3351,9 +3384,15 @@ $('fileNameCancelBtn')?.addEventListener('click',()=>closeFileNameDialog(null));
 $('fileNameCloseBtn')?.addEventListener('click',()=>closeFileNameDialog(null));
 $('fileNameDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closeFileNameDialog(null);});
 $('pdfBackBtn').addEventListener('click',()=>{pdfEditingId=null;showView('home');});
-$('pdfAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
-$('pdfEmptyAddBtn').addEventListener('click',()=>$('pdfImageInput').click());
-$('pdfImageInput').addEventListener('change',async e=>{const files=[...e.target.files];e.target.value='';await addPdfSources(files);});
+function openPdfActionDialog(){const dlg=$('pdfActionDialog');if(dlg&&!dlg.open)dlg.showModal();}
+function closePdfActionDialog(){const dlg=$('pdfActionDialog');if(dlg?.open)dlg.close();}
+$('pdfAddBtn').addEventListener('click',openPdfActionDialog);
+$('pdfEmptyAddBtn').addEventListener('click',openPdfActionDialog);
+$('pdfActionDialog')?.addEventListener('cancel',ev=>{ev.preventDefault();closePdfActionDialog();});
+$('pdfCameraChoiceBtn')?.addEventListener('click',()=>{closePdfActionDialog();$('pdfCameraInput')?.click();});
+$('pdfGalleryChoiceBtn')?.addEventListener('click',()=>{closePdfActionDialog();$('pdfGalleryInput')?.click();});
+$('pdfFileChoiceBtn')?.addEventListener('click',()=>{closePdfActionDialog();$('pdfFileInput')?.click();});
+for(const id of ['pdfCameraInput','pdfGalleryInput','pdfFileInput'])$(id)?.addEventListener('change',async e=>{const files=[...e.target.files];e.target.value='';await addPdfSources(files);});
 $('savePdfBtn').addEventListener('pointerdown',burstCorrectButton);
 $('savePdfBtn').addEventListener('click',requestPdfSave);
 $('autoBtn').addEventListener('click',()=>{history.push(points.map(p=>({...p})));points=autoDetectDocument();selectedIndex=-1;hidePointActions();renderEditor();toast('Image boundary re-detected.');});
@@ -3413,8 +3452,8 @@ if($('pdfImportDialog')) $('pdfImportDialog').addEventListener('cancel',ev=>{ev.
 loadSettings();
 loadOutputNameCounters();
 loadLabelProjectMeta();
-window.addEventListener('load',async()=>{ await restoreOutputHandle(); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();renderLabelBuilder();updateLabelRestoreUi();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
+window.addEventListener('load',async()=>{ await restoreOutputHandle(); if(outputDirHandle)await refreshAllOutputCounters({ask:false}); syncSettingsUi(); updateAiReferenceUi(); initAmbientShards();initHomeMesh();initMeshSliders();renderPdfBuilder();renderLabelBuilder();updateLabelRestoreUi();if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 window.addEventListener('pagehide',()=>{stopHomeCameraBg();stopLabelCamera(false);saveLabelProject().catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){stopHomeCameraBg();if(labelCameraStream)stopLabelCamera(false);} else if(views.home.classList.contains('active')||views.pdf.classList.contains('active')||views.label.classList.contains('active')) startHomeCameraBg(); });
 
-if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.36', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
+if('serviceWorker' in navigator) { window.addEventListener('load', async ()=>{ try { const reg = await navigator.serviceWorker.register('./sw.js?v=1.6.44', {updateViaCache:'none'}); await reg.update(); } catch(err){ console.warn(err); } }); }
