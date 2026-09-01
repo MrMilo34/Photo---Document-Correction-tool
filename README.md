@@ -1,6 +1,13 @@
-# MeshDoctor v1.6.44
+# MeshDoctor v1.6.45
 
-## v1.6.44 Folder-aware output naming + PDF source chooser
+## v1.6.45 Focused label-camera + icon update
+- Updated the Android app icon with the improved city-document design and squarer safe-area framing.
+- Label Camera ghost now shows the exact previous HQ capture content from the blue frame, scaled as a frozen alignment reference.
+- Pass 2 keeps the visible Pass 1 live map instead of resetting to a tiny strip.
+- Loop detection now requires more sweep/coverage and a stronger start-sequence match before completing a pass.
+- Added HQ capture starvation protection so dense text regions still get photographed.
+
+## v1.6.45 Folder-aware output naming + PDF source chooser
 - PDF, Image, and Label defaults are editable base-name families rather than fixed internal counters.
 - Settings displays the next available numbered name by scanning the selected `MeshDoctor/PDFs` or `MeshDoctor/Images` folder.
 - Example: files through `PDFs Tester 03.pdf` make the next default `PDFs Tester 04`; a brand-new `PDFs Tester` family starts at `01`.
