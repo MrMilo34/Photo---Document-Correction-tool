@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#090c12" />
   <title>MeshDoctor</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.6.46" />
-  <link rel="icon" href="icons/icon-192.png?v=1.6.46" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.46" />
-  <link rel="stylesheet" href="styles.css?v=1.6.46" />
+  <link rel="manifest" href="manifest.webmanifest?v=1.6.47" />
+  <link rel="icon" href="icons/icon-192.png?v=1.6.47" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=1.6.47" />
+  <link rel="stylesheet" href="styles.css?v=1.6.47" />
 </head>
 <body class="ambient-mode home-mode">
   <div id="ambientBackdrop" class="ambient-backdrop" aria-hidden="true">
@@ -34,9 +34,9 @@
     <section id="homeView" class="view active home-view">
       <button id="homeSettingsBtn" class="home-settings neon-icon-btn" aria-label="Settings">⚙️</button>
       <div class="hero-card splash-card">
-        <img class="home-splash" src="assets/home-splash.png?v=1.6.46" alt="MeshDoctor splash screen" />
+        <img class="home-splash" src="assets/home-splash.png?v=1.6.47" alt="MeshDoctor splash screen" />
       </div>
-      <div class="version-tag">release v1.6.46</div>
+      <div class="version-tag">release v1.6.47</div>
 
       <div class="home-actions">
         <button id="correctImageBtn" class="primary big-btn neon-action" type="button">✨ Correct Image</button>
@@ -311,11 +311,14 @@
   </dialog>
 
   <dialog id="aboutDialog">
-    <h2>MeshDoctor v1.6.46</h2>
+    <h2>MeshDoctor v1.6.47</h2>
     <p>The mesh points define the correction boundary. MeshDoctor can straighten photographed paperwork or keep a full photo framed for restoration.</p>
     <p><strong>AI Assisted</strong> uses secure AI image restoration when available. If it is unavailable, MeshDoctor automatically uses its on-device restoration fallback.</p>
     <p><strong>Create a PDF</strong> lets you combine images with selected pages from existing PDFs, omit pages you do not want, reorder everything, edit pages through MeshDoctor, and save a new PDF.</p>
-    <p><strong>v1.6.46:</strong> updates the Android app icon, makes the label-camera ghost show the exact previous HQ blue-frame capture instead of a forward-looking strip, tightens loop completion with stronger sweep/coverage gating plus start-sequence checks, preserves the full Pass 1 map into Pass 2, and adds a capture-starvation safeguard so dense text areas still receive HQ shots.</p>
+    <p><strong>v1.6.47:</strong> introduces guided confidence capture: the full frame uses 10/20/40/20/10 zoned recognition for mapping and loop detection, the central 40% supplies HQ detail, and Pass 2 displays a red→orange→yellow→lime→green confidence rail with a live position marker. Pass 2 now tracks against the fixed Pass 1 map with circular seam-aware matching.</p>
+    <p><strong>v1.6.46:</strong> introduces the central-detail capture model, using a wide tracking frame while concentrating final HQ pixels in the flatter middle portion.</p>
+    <p><strong>v1.6.45:</strong> updates the Android icon, fixes the HQ ghost to show the actual prior blue-frame capture, and adds text-region HQ starvation protection.</p>
+    <p><strong>v1.6.44:</strong> adds folder-aware output naming and the dedicated Camera / Gallery / PDF source chooser.</p>
     <p><strong>v1.6.43:</strong> standardizes automatic output naming across PDFs, normal images, Side by Side images, and Label Maker. File Output now exposes independent PDF, Image, and Label next-name fields with counters that advance separately after each successful save.</p>
     <p><strong>v1.6.42:</strong> restores a dedicated Correct Image action chooser with separate Camera and Gallery actions, while keeping Side by Side and the Label Maker changes untouched.</p>
     <p><strong>v1.6.41:</strong> simplifies the home screen around Correct Image, adds Side by Side assembly with horizontal/vertical layouts and drag ordering, and routes the finished composite into the normal MeshDoctor correction and naming workflow.</p>
@@ -437,8 +440,8 @@
   <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Working…</div></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="config.js?v=1.6.46"></script>
+  <script src="config.js?v=1.6.47"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous"></script>
-  <script src="app.js?v=1.6.46"></script>
+  <script src="app.js?v=1.6.47"></script>
 </body>
 </html>

@@ -1,28 +1,23 @@
-# MeshDoctor v1.6.46
+# MeshDoctor v1.6.47
 
-## v1.6.46 Central-detail heat map capture
-- Full blue capture frame remains the low-resolution tracking/map context.
-- Middle 50% is the HQ detail zone; outer 25% + 25% are retained for rotation context.
-- Final HQ panorama uses only the central detail slice from each saved HQ photograph.
-- Coverage bins/Pass 2 heat now reflect those true detail slices.
-- Auto-capture stride is derived from the successful narrow-window test (~9.25% of full tracking-frame width), targeting roughly 1.5x the HQ density of the wide test.
-- Added a subtle visual central heat zone inside the blue frame.
+## v1.6.47 Guided confidence pass
+- Uses a 10% context / 20% positioning / 40% HQ detail / 20% positioning / 10% context model across the blue tracking frame.
+- Full-frame zoned recognition drives map location and loop recognition; only the flatter central 40% is used as final HQ detail.
+- Pass 2 keeps Pass 1 as a fixed visible map and uses circular seam-aware matching instead of extending a second panorama.
+- Live Stitch Preview adds a red/orange/yellow/lime/green confidence rail after Pass 1 and a moving current-position marker during Pass 2.
+- Confidence is initially based on true HQ coverage; Pass 2 captures turn verified areas green.
+- Physical loop recognition is independent from HQ coverage, so an incomplete first lap can still hand off to the quality pass.
+- Narrower 40% detail sampling naturally increases HQ capture density.
 
-## v1.6.46 Focused label-camera + icon update
-- Updated the Android app icon with the improved city-document design and squarer safe-area framing.
-- Label Camera ghost now shows the exact previous HQ capture content from the blue frame, scaled as a frozen alignment reference.
-- Pass 2 keeps the visible Pass 1 live map instead of resetting to a tiny strip.
-- Loop detection now requires more sweep/coverage and a stronger start-sequence match before completing a pass.
-- Added HQ capture starvation protection so dense text regions still get photographed.
+## v1.6.46 Central-detail capture
+- Wide frame retained for tracking; central portion prioritized for flatter HQ slices.
 
-## v1.6.46 Folder-aware output naming + PDF source chooser
-- PDF, Image, and Label defaults are editable base-name families rather than fixed internal counters.
-- Settings displays the next available numbered name by scanning the selected `MeshDoctor/PDFs` or `MeshDoctor/Images` folder.
-- Example: files through `PDFs Tester 03.pdf` make the next default `PDFs Tester 04`; a brand-new `PDFs Tester` family starts at `01`.
-- Saving with the displayed default name into the selected output folder refreshes the sequence from disk. Saving with a different export name or falling back outside the selected folder does not advance the default family.
-- Existing matching filenames are never intentionally overwritten; the folder scan selects the next safe number.
-- Create a PDF now opens a dedicated Camera / Gallery / PDF chooser.
+## v1.6.45 Focused label-camera + icon update
+- Updated Android app icon, exact prior-HQ ghost, stronger loop checks, and dense-text capture starvation protection.
 
+## v1.6.44 Folder-aware naming
+- Custom base-name families scan the selected output folder for the next safe numbered filename.
+- Create a PDF uses a Camera / Gallery / PDF chooser.
 
 ## v1.6.43 Output naming standard
 - Adds independent PDF, Image, and Label default/next-name settings.

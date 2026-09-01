@@ -87,9 +87,11 @@ const LABEL_CAMERA_ASSIST_Y = .025;
 const LABEL_CAMERA_GHOST_RATIO = .24;
 const LABEL_CAMERA_GHOST_INSET = .045;
 const LABEL_CAMERA_PASS_BINS = 36;
-const LABEL_CAMERA_DETAIL_RATIO = .50;
+const LABEL_CAMERA_DETAIL_RATIO = .40;
 const LABEL_CAMERA_DETAIL_EDGE = (1-LABEL_CAMERA_DETAIL_RATIO)/2;
-const LABEL_CAMERA_DETAIL_STRIDE = .185; // narrow-test stride applied to the central detail zone
+const LABEL_CAMERA_DETAIL_STRIDE = .185; // successful narrow-test stride, now applied to central 40%
+const LABEL_CAMERA_ZONE_EDGES = [0,.10,.30,.70,.90,1];
+const LABEL_CAMERA_ZONE_WEIGHTS = [.12,.20,.36,.20,.12];
 
 
 let points = [];
@@ -2076,7 +2078,21 @@ function renderLabelCameraPreviewUi(){
   const scale=Math.min(availW/sw,availH/Math.max(1,pano.height));
   const dw=Math.max(1,Math.round(sw*scale)),dh=Math.max(1,Math.round(pano.height*scale)),dx=pad,dy=Math.round((c.height-dh)/2);
   ctx.strokeStyle='rgba(87,217,255,.16)';ctx.lineWidth=2;ctx.strokeRect(dx-1,dy-1,dw+2,dh+2);ctx.drawImage(pano,sx,0,sw,pano.height,dx,dy,dw,dh);
-  ctx.fillStyle='rgba(53,207,255,.18)';ctx.fillRect(pad,c.height-7,availW,3);ctx.fillStyle='rgba(53,207,255,.92)';ctx.fillRect(pad,c.height-7,Math.max(24,Math.min(availW,dw)),3);
+  if(s.pass1Complete&&s.pass1MapWidth){
+    const bins=s.hqCoverageBins||[],railY=c.height-10,railH=6,railW=availW;
+    ctx.fillStyle='rgba(255,255,255,.10)';ctx.fillRect(pad,railY,railW,railH);
+    const colorFor=v=>v<.25?'#ff3b4d':v<.45?'#ff8a2a':v<.65?'#ffd84a':v<.88?'#a9f542':'#28d86b';
+    for(let i=0;i<bins.length;i++){
+      const x0=pad+i/bins.length*railW,x1=pad+(i+1)/bins.length*railW;
+      ctx.fillStyle=colorFor(clamp(bins[i]||0,0,1));ctx.fillRect(Math.floor(x0),railY,Math.max(1,Math.ceil(x1-x0)+1),railH);
+    }
+    if((s.scanPass||1)===2){
+      const frameW=Math.max(1,s.previewAnchor?.canvas?.width||1),mapW=Math.max(1,s.pass1MapWidth),pos=(((Number(s.pass2MapX)||0)+frameW/2)%mapW+mapW)%mapW,mx=pad+(pos/mapW)*railW;
+      ctx.save();ctx.strokeStyle='rgba(255,255,255,.98)';ctx.lineWidth=2;ctx.shadowColor='rgba(53,207,255,.9)';ctx.shadowBlur=5;ctx.beginPath();ctx.moveTo(mx,railY-4);ctx.lineTo(mx,railY+railH+2);ctx.stroke();ctx.restore();
+    }
+  }else{
+    ctx.fillStyle='rgba(53,207,255,.18)';ctx.fillRect(pad,c.height-7,availW,3);ctx.fillStyle='rgba(53,207,255,.92)';ctx.fillRect(pad,c.height-7,Math.max(24,Math.min(availW,dw)),3);
+  }
 }
 function labelCameraLowResFrame(){
   const s=labelCameraGuideState,video=$('labelCameraVideo'),crop=labelCameraSourceCrop(0,0);if(!s||!video?.videoWidth||!crop)return null;
@@ -2198,6 +2214,34 @@ function labelCameraFrameIdentityScore(a,b){
   const rawScore=sameLabelCameraFrameScore(a,b);
   return clamp(edgeScore*.72+rawScore*.28,0,1);
 }
+
+function labelCameraZoneSimilarity(a,b,x0f,x1f){
+  if(!a||!b||a.gw!==b.gw||a.gh!==b.gh)return 0;
+  const gw=a.gw,gh=a.gh,x0=clamp(Math.floor(gw*x0f),0,gw-1),x1=clamp(Math.ceil(gw*x1f),x0+1,gw);
+  let n=0,sa=0,sb=0,sea=0,seb=0;
+  for(let y=1;y<gh-1;y+=2)for(let x=x0;x<x1;x+=2){const i=y*gw+x;sa+=a.gray[i];sb+=b.gray[i];sea+=a.edge?.[i]||0;seb+=b.edge?.[i]||0;n++;}
+  if(n<8)return 0;
+  const ma=sa/n,mb=sb/n,mea=sea/n,meb=seb/n;
+  let cov=0,va=0,vb=0,ecov=0,eva=0,evb=0,raw=0;
+  for(let y=1;y<gh-1;y+=2)for(let x=x0;x<x1;x+=2){const i=y*gw+x,da=a.gray[i]-ma,db=b.gray[i]-mb,dea=(a.edge?.[i]||0)-mea,deb=(b.edge?.[i]||0)-meb;cov+=da*db;va+=da*da;vb+=db*db;ecov+=dea*deb;eva+=dea*dea;evb+=deb*deb;raw+=Math.abs(a.gray[i]-b.gray[i]);}
+  const grayCorr=(va>1&&vb>1)?cov/Math.sqrt(va*vb):null;
+  const edgeCorr=(eva>1&&evb>1)?ecov/Math.sqrt(eva*evb):grayCorr;
+  const rawScore=clamp(1-raw/(n*255),0,1);
+  if(grayCorr==null)return rawScore;
+  const corrScore=clamp((((grayCorr*.72+(edgeCorr??grayCorr)*.28)+1)/2),0,1);
+  return clamp(corrScore*.78+rawScore*.22,0,1);
+}
+function labelCameraZonedEvidence(a,b){
+  if(!a||!b)return {score:0,zones:[0,0,0,0,0],strong:false,near:false};
+  const zones=[];
+  for(let i=0;i<5;i++)zones.push(labelCameraZoneSimilarity(a,b,LABEL_CAMERA_ZONE_EDGES[i],LABEL_CAMERA_ZONE_EDGES[i+1]));
+  const score=zones.reduce((sum,v,i)=>sum+v*LABEL_CAMERA_ZONE_WEIGHTS[i],0);
+  const outer=(zones[0]+zones[4])/2,shoulders=(zones[1]+zones[3])/2,center=zones[2];
+  const strong=score>=.76&&outer>=.58&&shoulders>=.68&&center>=.70;
+  const near=score>=.65&&outer>=.46&&shoulders>=.56&&center>=.58;
+  return {score,zones,outer,shoulders,center,strong,near};
+}
+
 // v1.6.36 loop fingerprint. A bottle rarely returns to the first view at the exact
 // same horizontal pixel. Pearson correlation is exposure tolerant and the small shift
 // search lets the first accepted HQ photograph act as a genuine full-rotation marker
@@ -2229,44 +2273,39 @@ function labelCameraShiftCorrelation(a,b){
 // alone can miss the real start. Requiring repeated agreement after a substantial sweep
 // is safer than requiring one overly-perfect match.
 function labelCameraLoopReturnEvidence(reference,frame){
-  if(!reference||!frame)return {strong:false,near:false,score:0,corr:-1,identity:0,raw:0};
+  if(!reference||!frame)return {strong:false,near:false,score:0,corr:-1,identity:0,raw:0,zones:[0,0,0,0,0]};
   const corr=labelCameraShiftCorrelation(reference,frame);
   const identity=labelCameraFrameIdentityScore(reference,frame);
   const raw=sameLabelCameraFrameScore(reference,frame);
+  const zoned=labelCameraZonedEvidence(reference,frame);
   const narrow=!!frame.narrow;
-  const strong=corr>(narrow?.30:.34)||identity>(narrow?.80:.84)||raw>(narrow?.835:.87);
-  const near=corr>(narrow?.20:.23)||identity>(narrow?.735:.77)||raw>(narrow?.77:.81);
-  // normalized diagnostic score only; decisions above retain the independent metrics.
-  const score=Math.max(
-    clamp((corr-.12)/.55,0,1),
-    clamp((identity-.62)/.34,0,1),
-    clamp((raw-.68)/.27,0,1)
-  );
-  return {strong,near,score,corr,identity,raw};
+  const supportStrong=corr>(narrow?.24:.28)||identity>(narrow?.75:.79)||raw>(narrow?.80:.83);
+  const supportNear=corr>(narrow?.16:.19)||identity>(narrow?.69:.72)||raw>(narrow?.73:.76);
+  // Loop identity comes from the whole frame: 10/20/40/20/10 zones must agree.
+  // The old correlation/identity metrics are retained only as supporting evidence.
+  const strong=zoned.strong&&supportStrong;
+  const near=zoned.near&&supportNear;
+  const support=Math.max(clamp((corr-.10)/.58,0,1),clamp((identity-.58)/.38,0,1),clamp((raw-.64)/.31,0,1));
+  const score=clamp(zoned.score*.72+support*.28,0,1);
+  return {strong,near,score,corr,identity,raw,zones:zoned.zones,zoneOuter:zoned.outer,zoneShoulders:zoned.shoulders,zoneCenter:zoned.center};
 }
 
 
 function labelCameraLoopSequenceReady(frame){
-  const s=labelCameraGuideState;
-  if(!s||!frame)return {ok:false,score:0,count:0};
+  const s=labelCameraGuideState;if(!s||!frame)return {ok:false,score:0,count:0};
   const seq=(s.loopStartSequence||[]).filter(Boolean);
-  if((s.scanPass||1)===1){
-    if(seq.length<3 && (s.previewFrameCount||0)>=3){
-      const last=seq[seq.length-1];
-      if(!last || labelCameraFrameIdentityScore(last,frame)<.965){
-        seq.push(frame);
-        s.loopStartSequence=seq.slice(0,3);
-      }
-    }
+  if((s.scanPass||1)===1&&seq.length<3&&(s.previewFrameCount||0)>=3){
+    const last=seq[seq.length-1];
+    if(!last||labelCameraFrameIdentityScore(last,frame)<.955){seq.push(frame);s.loopStartSequence=seq.slice(0,3);}
   }
-  if(seq.length<2)return {ok:true,score:1,count:seq.length};
-  const scores=seq.map(ref=>labelCameraLoopReturnEvidence(ref,frame).score||0).sort((a,b)=>b-a);
-  const top=scores[0]||0,next=scores[1]||0,top2=((scores[0]||0)+(scores[1]||0))/2;
-  const uniqueGap=top-next;
-  const ok=top2>=.79 && uniqueGap>=.035;
-  return {ok,score:top2,count:seq.length};
+  if(!seq.length)return {ok:true,score:1,count:0};
+  // A loop does not require one current frame to equal three different start frames.
+  // We use the best zoned match as confirmation while repeated consecutive frames
+  // provide the temporal evidence in loopCandidateFrames.
+  const scores=seq.map(ref=>labelCameraZonedEvidence(ref,frame).score||0).sort((a,b)=>b-a);
+  const best=scores[0]||0;
+  return {ok:best>=.70,score:best,count:seq.length};
 }
-
 function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
@@ -2302,9 +2341,9 @@ function labelCameraMarkCoverage(layout,weight=1){
   const s=labelCameraGuideState;if(!s?.pass1MapWidth||!layout||!Number.isFinite(layout.start))return;
   const bins=s.hqCoverageBins||(s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0));
   const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
-  const center=Number(layout.start)+frameW/2,radius=frameW*.50;
+  const mapW=Math.max(1,s.pass1MapWidth),center=((Number(layout.start)+frameW/2)%mapW+mapW)%mapW,radius=frameW*.50;
   for(let i=0;i<bins.length;i++){
-    const x=(i+.5)/bins.length*s.pass1MapWidth,dist=Math.abs(x-center);
+    const x=(i+.5)/bins.length*mapW,linear=Math.abs(x-center),dist=Math.min(linear,mapW-linear);
     // The central HQ slice is the useful detail area. Keep its heat high and taper only
     // near the slice edges rather than pretending the whole tracking frame was photographed.
     const u=dist/Math.max(1,radius);
@@ -2323,39 +2362,50 @@ function labelCameraHqCoverageRatio(){
 }
 function labelCameraCoverageNeedAt(x,frameW){
   const s=labelCameraGuideState,bins=s?.hqCoverageBins;if(!s?.pass1MapWidth||!bins?.length)return true;
-  const center=clamp(Number(x)+Math.max(1,frameW)/2,0,s.pass1MapWidth-1),idx=clamp(Math.floor(center/s.pass1MapWidth*bins.length),0,bins.length-1);
+  const mapW=Math.max(1,s.pass1MapWidth),center=((Number(x)+Math.max(1,frameW)/2)%mapW+mapW)%mapW,idx=clamp(Math.floor(center/mapW*bins.length),0,bins.length-1);
   const lo=Math.max(0,idx-1),hi=Math.min(bins.length-1,idx+1);let best=0;
   for(let i=lo;i<=hi;i++)best=Math.max(best,bins[i]||0);
   return best<.62;
 }
 function labelCameraMapCandidateFrame(map,x,frame){
   if(!map||!frame?.canvas?.width||!frame?.canvas?.height)return null;
-  const w=Math.min(frame.canvas.width,map.width),sx=clamp(Math.round(x),0,Math.max(0,map.width-w));
-  const c=document.createElement('canvas');c.width=frame.canvas.width;c.height=frame.canvas.height;
-  c.getContext('2d',{alpha:false}).drawImage(map,sx,0,w,map.height,0,0,c.width,c.height);
+  const w=Math.min(frame.canvas.width,map.width),mapW=Math.max(1,map.width),sx=((Math.round(x)%mapW)+mapW)%mapW;
+  const c=document.createElement('canvas');c.width=frame.canvas.width;c.height=frame.canvas.height;const cx=c.getContext('2d',{alpha:false});
+  const first=Math.min(w,mapW-sx);cx.drawImage(map,sx,0,first,map.height,0,0,first,c.height);
+  if(first<w)cx.drawImage(map,0,0,w-first,map.height,first,0,w-first,c.height);
+  if(w<c.width)cx.drawImage(c,0,0,w,c.height,0,0,c.width,c.height);
   return labelCameraTrackingFrameFromCanvas(c,frame);
 }
 function labelCameraMatchPass1Map(frame){
   const s=labelCameraGuideState,map=s?.pass1Map;if(!s||!map||!frame)return null;
-  const frameW=Math.max(1,frame.canvas.width),expected=clamp(s.pass2Travel||0,0,Math.max(0,map.width-frameW));
-  const span=Math.max(frameW*.70,map.width*.055),step=Math.max(4,frameW*.18);let best={score:-1,x:expected};
-  for(let dx=-span;dx<=span;dx+=step){const x=clamp(expected+dx,0,Math.max(0,map.width-frameW)),cand=labelCameraMapCandidateFrame(map,x,frame);if(!cand)continue;const score=labelCameraFrameIdentityScore(cand,frame);if(score>best.score)best={score,x};}
-  const corr=clamp((best.score-.25)/.65,0,1);s.pass2MapScore=best.score;s.pass2MapConfidence=corr;s.pass2MatchedX=best.x;
-  s.pass2MapX=clamp(best.x,0,Math.max(0,map.width-frameW));return best;
+  const frameW=Math.max(1,frame.canvas.width),mapW=Math.max(1,map.width),expected=((s.pass2Travel||0)%mapW+mapW)%mapW;
+  const span=Math.max(frameW*1.10,mapW*.09),step=Math.max(3,frameW*.12),candidates=[];
+  for(let dx=-span;dx<=span;dx+=step){
+    const x=((expected+dx)%mapW+mapW)%mapW,cand=labelCameraMapCandidateFrame(map,x,frame);if(!cand)continue;
+    const z=labelCameraZonedEvidence(cand,frame),identity=labelCameraFrameIdentityScore(cand,frame),score=clamp(z.score*.78+identity*.22,0,1);
+    candidates.push({score,x,zoned:z.score});
+  }
+  candidates.sort((a,b)=>b.score-a.score);const best=candidates[0]||{score:0,x:expected},separation=Math.max(frameW*.55,mapW*.035);
+  const circularDist=(a,b)=>{const d=Math.abs(a-b);return Math.min(d,mapW-d);};
+  const second=candidates.find(c=>circularDist(c.x,best.x)>=separation)||candidates[1]||{score:0,x:best.x};
+  const margin=Math.max(0,best.score-second.score);
+  const confidence=clamp(((best.score-.54)/.36)*.72+clamp(margin/.13,0,1)*.28,0,1);
+  s.pass2MapScore=best.score;s.pass2MapConfidence=confidence;s.pass2MatchedX=best.x;
+  s.pass2MapX=((best.x%mapW)+mapW)%mapW;return {...best,secondScore:second.score,confidence};
 }
 function beginLabelCameraSecondPass(frame,direction){
   const s=labelCameraGuideState;if(!s||s.scanPass!==1)return false;
   const snapshot=labelCameraSnapshotActivePreview();if(!snapshot)return false;
   s.pass1Map=snapshot.canvas;s.pass1MapWidth=snapshot.width;s.pass1MapHeight=snapshot.height;s.pass1PreviewStart=snapshot.start;s.pass1PreviewEnd=snapshot.end;s.pass1Complete=true;
   labelCameraNormalizePass1Layouts(snapshot);labelCameraRebuildCoverage();
-  s.previewPanorama=snapshot.canvas;s.previewStartX=snapshot.start;s.previewEndX=snapshot.end;s.previewAnchor=frame;s.previewFrameCount=Math.max(1,s.previewFrameCount||1);s.previewAdvance=0;
+  s.previewPanorama=snapshot.canvas;s.previewStartX=0;s.previewEndX=snapshot.width;s.previewAnchor=frame;s.previewFrameCount=Math.max(1,s.previewFrameCount||1);s.previewAdvance=0;
   s.scanPass=2;s.pass2StartReference=frame;s.pass2Travel=0;s.pass2MapX=0;s.pass2MatchedX=0;s.pass2MapScore=1;s.pass2MapConfidence=1;s.pass2Complete=false;s.loopHint=false;s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.liveAddsSinceCapture=0;s.motionStepHistory=[];s.captureProgress=0;s.alignScore=0;s.passTransitionUntil=performance.now()+1800;
   renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Loop detected · Pass 1 mapped. Continue rotating for Pass 2 detail capture.');return true;
 }
 function labelCameraCurrentGlobalLayout(){
   const s=labelCameraGuideState,local=labelCameraCurrentPreviewLayout();if(!s||!local)return null;
   if((s.scanPass||1)===1||!s.pass1Complete)return {...local,pass:1};
-  const frameW=Math.max(1,local.frameWidth||s.previewAnchor?.canvas?.width||1),start=clamp(Number(s.pass2MapX)||Number(s.pass2Travel)||0,0,Math.max(0,(s.pass1MapWidth||frameW)-frameW));
+  const frameW=Math.max(1,local.frameWidth||s.previewAnchor?.canvas?.width||1),mapW=Math.max(1,s.pass1MapWidth||frameW),raw=Number.isFinite(Number(s.pass2MapX))?Number(s.pass2MapX):(Number(s.pass2Travel)||0),start=((raw%mapW)+mapW)%mapW;
   return {start,end:start+frameW,frameWidth:frameW,direction:local.direction||s.previewDirection||null,pass:2,mapScore:s.pass2MapScore||0};
 }
 function appendLabelCameraLivePixels(frame,est){
@@ -2415,21 +2465,26 @@ function appendLabelCameraLivePixels(frame,est){
   // This lets us lower the visual threshold enough to survive glare/text while avoiding
   // an early false closure on a similar black/white panel.
   const requiredSweep=(s.scanPass||1)===2
-    ?Math.max(frame.canvas.width*2.9,(s.pass1MapWidth||0)*.88)
-    :frame.canvas.width*(narrow?3.35:3.0);
-  const coverageGate=(s.scanPass||1)===2?labelCameraHqCoverageRatio()>=.85:true;
-  const enoughSweep=s.previewFrameCount>=18&&passTravel>requiredSweep&&labelCameraSessionCount>=4&&coverageGate;
+    ?Math.max(frame.canvas.width*2.35,(s.pass1MapWidth||0)*.80)
+    :frame.canvas.width*(narrow?2.75:2.45);
+  // Physical loop recognition is deliberately independent from HQ coverage. Pass 2
+  // exists to improve weak coverage; missing HQ detail must never prevent loop closure.
+  const enoughSweep=s.previewFrameCount>=16&&passTravel>requiredSweep&&labelCameraSessionCount>=4;
   const evidence=enoughSweep?labelCameraLoopReturnEvidence(loopReference,frame):{strong:false,near:false,score:0,corr:-1,identity:0,raw:0};
   const seq=labelCameraLoopSequenceReady(frame);
-  s.loopCorrelation=evidence.corr;s.loopScore=Math.min(1,((evidence.score||0)*.72)+((seq.score||0)*.28));
+  s.loopCorrelation=evidence.corr;s.loopScore=Math.min(1,((evidence.score||0)*.78)+((seq.score||0)*.22));
   if(enoughSweep&&evidence.strong&&seq.ok){
     if(!s.loopCandidateFrames)s.loopCandidateStartX=direction==='left'?(s.previewStartX||0):(s.previewEndX||0);
     s.loopCandidateFrames=(s.loopCandidateFrames||0)+1;
-    if(s.loopCandidateFrames>=4){
+    if(s.loopCandidateFrames>=3){
       if((s.scanPass||1)===1){beginLabelCameraSecondPass(frame,direction);return false;}
-      s.pass2Complete=true;s.loopHint=true;s.loopCutX=Number.isFinite(s.loopCandidateStartX)?s.loopCandidateStartX:(direction==='left'?(s.previewStartX||0):(s.previewEndX||0));s.captureProgress=0;s.alignScore=0;renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Pass 2 complete. Press Done to build the HQ label.');return false;
+      s.pass2Complete=true;s.loopHint=true;s.loopCutX=Number.isFinite(s.loopCandidateStartX)?s.loopCandidateStartX:(direction==='left'?(s.previewStartX||0):(s.previewEndX||0));s.captureProgress=0;s.alignScore=0;renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Pass 2 loop complete. Press Done, or continue if the confidence rail still shows weak areas.');return false;
     }
   }else if(!evidence.near||!seq.ok){s.loopCandidateFrames=0;s.loopCandidateStartX=null;}
+
+  if((s.scanPass||1)===2){
+    s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();s.liveAddsSinceCapture=(s.liveAddsSinceCapture||0)+1;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[...(s.motionStepHistory||[]),est.newRatio].slice(-8);s.pass2Travel=(s.pass2Travel||0)+newPx;labelCameraMatchPass1Map(frame);renderLabelCameraPreviewUi();return true;
+  }
 
   if(direction==='left'){
     const dst=Math.round((s.previewStartX||0)-newPx);if(dst<4)return false;
@@ -2438,7 +2493,7 @@ function appendLabelCameraLivePixels(frame,est){
     const dst=Math.round(s.previewEndX||0);if(dst+newPx>=pano.width-4)return false;
     ctx.drawImage(frame.canvas,overlapPx,0,newPx,frame.canvas.height,dst,0,newPx,frame.canvas.height);s.previewEndX=dst+newPx;
   }
-  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();s.liveAddsSinceCapture=(s.liveAddsSinceCapture||0)+1;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[...(s.motionStepHistory||[]),est.newRatio].slice(-8);if((s.scanPass||1)===2){s.pass2Travel=(s.pass2Travel||0)+newPx;labelCameraMatchPass1Map(frame);}
+  s.previewAnchor=frame;s.previewFrameCount++;s.previewAdvance+=newPx;s.liveNewRatio=est.newRatio;s.trackingLostFrames=0;s.lastAcceptedMotionAt=performance.now();s.liveAddsSinceCapture=(s.liveAddsSinceCapture||0)+1;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[...(s.motionStepHistory||[]),est.newRatio].slice(-8);
   renderLabelCameraPreviewUi();return true;
 }
 function advanceLabelCameraPreviewFromLive(){
@@ -2476,7 +2531,7 @@ function updateLabelCameraUi(){
   if((s.scanPass||1)===2){
     const coverage=Math.round(clamp(labelCameraHqCoverageRatio(),0,1)*100);
     const confidence=Math.round(clamp(s.pass2MapConfidence||0,0,1)*100);
-    help.textContent=`Pass 2 · HQ coverage ${coverage}% · Map ${confidence}%`;
+    help.textContent=`Pass 2 · HQ ${coverage}% · Map ${confidence}% · Follow confidence rail`;
     if(confidence>=65)help.classList.add('match-good');else if(confidence>=40)help.classList.add('match-almost');
     return;
   }
@@ -2517,7 +2572,7 @@ function drawLabelCameraOverlay(){
   }
 
   // Central detail heat zone: the full blue box is used for mapping/rotation context,
-  // while only the middle 50% is treated as the high-value HQ detail slice.
+  // while only the middle 40% is treated as the high-value HQ detail slice.
   const hotLeft=left+(right-left)*LABEL_CAMERA_DETAIL_EDGE,hotRight=right-(right-left)*LABEL_CAMERA_DETAIL_EDGE;
   ctx.save();
   const hg=ctx.createLinearGradient(hotLeft,0,hotRight,0);
@@ -2525,6 +2580,7 @@ function drawLabelCameraOverlay(){
   ctx.fillStyle=hg;ctx.fillRect(hotLeft,top,Math.max(1,hotRight-hotLeft),bottom-top);
   ctx.setLineDash([5,5]);ctx.strokeStyle='rgba(125,229,255,.22)';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(hotLeft,top);ctx.lineTo(hotLeft,bottom);ctx.moveTo(hotRight,top);ctx.lineTo(hotRight,bottom);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+  ctx.save();ctx.setLineDash([3,7]);ctx.strokeStyle='rgba(157,92,255,.13)';ctx.lineWidth=1;for(const f of [.10,.30,.70,.90]){const zx=left+(right-left)*f;ctx.beginPath();ctx.moveTo(zx,top);ctx.lineTo(zx,bottom);ctx.stroke();}ctx.setLineDash([]);ctx.restore();
 
   // The capture box remains only as a framing guide for the NEW live section. There is
   // intentionally no visible overlap strip, seam target, center line, or alignment text.
