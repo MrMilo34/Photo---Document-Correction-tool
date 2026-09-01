@@ -1,20 +1,15 @@
-# MeshDoctor v1.6.49
+# MeshDoctor v1.6.50
+
+## v1.6.50 Capture distribution refinement
+- Added map-position spacing for automatic HQ capture so neighboring regions do not rapid-fire photos.
+- Added near-duplicate HQ suppression: if a new auto-capture lands too close to an existing section and does not clearly improve it, it is skipped.
+- Pass 2 capture is now more selective in already-strong regions and remains more aggressive in weak regions.
 
 ## v1.6.49 Text-tracking + loop-bank stability update
 - Loop recognition uses a tight frozen bank of live frames captured around the true start, preventing later HQ locations from contaminating loop identity.
 - Full-frame 10/20/40/20/10 loop comparison is shift-tolerant before zone scoring, so small hand/camera repositioning does not destroy a genuine return match.
 - Dense/repeated text is allowed to advance the live map at a lower score when travel is still physically sane; large jumps remain rejected.
 - Central-40% HQ sampling stride and auto-capture gates are moderately more aggressive for additional keyframes.
-
-## v1.6.49 Guided confidence pass
-- Uses a 10% context / 20% positioning / 40% HQ detail / 20% positioning / 10% context model across the blue tracking frame.
-- Full-frame zoned recognition drives map location and loop recognition; only the flatter central 40% is used as final HQ detail.
-- Pass 2 keeps Pass 1 as a fixed visible map and uses circular seam-aware matching instead of extending a second panorama.
-- Live Stitch Preview adds a red/orange/yellow/lime/green confidence rail after Pass 1 and a moving current-position marker during Pass 2.
-- Confidence is initially based on true HQ coverage; Pass 2 captures turn verified areas green.
-- Physical loop recognition is independent from HQ coverage, so an incomplete first lap can still hand off to the quality pass.
-- Narrower 40% detail sampling naturally increases HQ capture density.
-
 ## v1.6.46 Central-detail capture
 - Wide frame retained for tracking; central portion prioritized for flatter HQ slices.
 

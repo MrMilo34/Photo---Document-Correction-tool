@@ -90,6 +90,11 @@ const LABEL_CAMERA_PASS_BINS = 36;
 const LABEL_CAMERA_DETAIL_RATIO = .40;
 const LABEL_CAMERA_DETAIL_EDGE = (1-LABEL_CAMERA_DETAIL_RATIO)/2;
 const LABEL_CAMERA_DETAIL_STRIDE = .155; // successful narrow-test stride, now applied to central 40%
+const LABEL_CAMERA_CAPTURE_SPACING_PASS1 = .72;
+const LABEL_CAMERA_CAPTURE_SPACING_PASS2_WEAK = .50;
+const LABEL_CAMERA_CAPTURE_SPACING_PASS2_MED = .66;
+const LABEL_CAMERA_CAPTURE_SPACING_PASS2_STRONG = .90;
+const LABEL_CAMERA_CAPTURE_NEARBY_RADIUS = .42;
 const LABEL_CAMERA_ZONE_EDGES = [0,.10,.30,.70,.90,1];
 const LABEL_CAMERA_ZONE_WEIGHTS = [.12,.20,.36,.20,.12];
 
@@ -1921,6 +1926,7 @@ function defaultLabelCameraGuideState(){
     trackingLostFrames:0,
     stationaryFrames:0,
     lastCaptureReferenceFrame:null,
+    lastCaptureMapCenter:null,
     lastAcceptedMotionAt:0,
     directionCandidate:null,
     directionVotes:0,
@@ -2341,7 +2347,7 @@ function seedLabelCameraPreviewFromLive(){
   const s=labelCameraGuideState;if(!s)return null;const frame=labelCameraLowResFrame();if(!frame)return null;
   const pano=document.createElement('canvas');pano.width=1600;pano.height=frame.canvas.height;const ctx=pano.getContext('2d',{alpha:false});ctx.fillStyle='#07101a';ctx.fillRect(0,0,pano.width,pano.height);
   const startX=520;ctx.drawImage(frame.canvas,startX,0);
-  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.firstLoopLiveReferenceFrame=null;s.loopStartSequence=[];s.loopStartBankUntil=0;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];s.scanPass=1;s.pass1Complete=false;s.pass2Complete=false;s.passTransitionUntil=0;s.pass1Map=null;s.pass1MapWidth=0;s.pass1MapHeight=0;s.pass1PreviewStart=0;s.pass1PreviewEnd=0;s.pass2StartReference=null;s.pass2Travel=0;s.pass2MapX=0;s.pass2MapScore=0;s.pass2MapConfidence=0;s.pass2MatchedX=0;s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);renderLabelCameraPreviewUi();return frame;
+  s.previewPanorama=pano;s.previewStartX=startX;s.previewEndX=startX+frame.canvas.width;s.previewAnchor=frame;s.firstPreviewFrame=frame;s.previewFrameCount=1;s.previewAdvance=0;s.previewDirection=null;s.directionCandidate=null;s.directionVotes=0;s.trackingLostFrames=0;s.stationaryFrames=0;s.lastAcceptedMotionAt=performance.now();s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.loopScore=0;s.loopCorrelation=0;s.loopHint=false;s.firstHqReferenceFrame=null;s.firstLoopLiveReferenceFrame=null;s.loopStartSequence=[];s.loopStartBankUntil=0;s.liveAddsSinceCapture=0;s.ambiguousFrames=0;s.rejectedMotionFrames=0;s.motionStepHistory=[];s.scanPass=1;s.pass1Complete=false;s.pass2Complete=false;s.passTransitionUntil=0;s.pass1Map=null;s.pass1MapWidth=0;s.pass1MapHeight=0;s.pass1PreviewStart=0;s.pass1PreviewEnd=0;s.pass2StartReference=null;s.pass2Travel=0;s.pass2MapX=0;s.pass2MapScore=0;s.pass2MapConfidence=0;s.pass2MatchedX=0;s.lastCaptureMapCenter=null;s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0);renderLabelCameraPreviewUi();return frame;
 }
 
 function labelCameraSnapshotActivePreview(){
@@ -2398,6 +2404,65 @@ function labelCameraCoverageNeedAt(x,frameW){
   for(let i=lo;i<=hi;i++)best=Math.max(best,bins[i]||0);
   return best<.62;
 }
+function labelCameraCoverageStrengthAt(x,frameW){
+  const s=labelCameraGuideState,bins=s?.hqCoverageBins;if(!s?.pass1MapWidth||!bins?.length)return 0;
+  const mapW=Math.max(1,s.pass1MapWidth),center=((Number(x)+Math.max(1,frameW)/2)%mapW+mapW)%mapW,idx=clamp(Math.floor(center/mapW*bins.length),0,bins.length-1);
+  const lo=Math.max(0,idx-1),hi=Math.min(bins.length-1,idx+1);let best=0;
+  for(let i=lo;i<=hi;i++)best=Math.max(best,bins[i]||0);
+  return clamp(best,0,1);
+}
+function labelCameraLayoutCenter(layout){
+  if(!layout||!Number.isFinite(layout.start))return null;
+  const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
+  return Number(layout.start)+frameW/2;
+}
+function labelCameraCaptureSpacingRequirement(layout){
+  const s=labelCameraGuideState;if(!s||!layout)return 0;
+  const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
+  if((s.scanPass||1)!==2)return frameW*LABEL_CAMERA_CAPTURE_SPACING_PASS1;
+  const coverage=labelCameraCoverageStrengthAt(layout.start,frameW);
+  if(coverage<.42)return frameW*LABEL_CAMERA_CAPTURE_SPACING_PASS2_WEAK;
+  if(coverage<.72)return frameW*LABEL_CAMERA_CAPTURE_SPACING_PASS2_MED;
+  return frameW*LABEL_CAMERA_CAPTURE_SPACING_PASS2_STRONG;
+}
+function labelCameraAutoCaptureSpacingReady(layout){
+  const s=labelCameraGuideState;if(!s||!layout)return true;
+  const center=labelCameraLayoutCenter(layout),last=Number(s.lastCaptureMapCenter);
+  if(!Number.isFinite(center)||!Number.isFinite(last))return true;
+  const minDist=labelCameraCaptureSpacingRequirement(layout);
+  if(!Number.isFinite(minDist)||minDist<=0)return true;
+  if((s.scanPass||1)===2&&s.pass1MapWidth){
+    const mapW=Math.max(1,s.pass1MapWidth),a=((center%mapW)+mapW)%mapW,b=((last%mapW)+mapW)%mapW;
+    const linear=Math.abs(a-b),dist=Math.min(linear,mapW-linear);
+    return dist>=minDist;
+  }
+  return Math.abs(center-last)>=minDist;
+}
+function labelCameraQualityRank(rec){
+  const q=rec?.quality;if(!q)return .5;
+  const score=clamp(q.score??.5,0,1),blur=clamp((q.blurRatio??1)/1.15,0,1),clip=1-clamp(q.clip??0,0,1);
+  return clamp(score*.60+blur*.25+clip*.15,0,1);
+}
+function labelCameraFindNearbyCapture(layout){
+  const s=labelCameraGuideState;if(!layout)return null;
+  const center=labelCameraLayoutCenter(layout);
+  const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
+  if(!Number.isFinite(center))return null;
+  const radius=frameW*LABEL_CAMERA_CAPTURE_NEARBY_RADIUS;
+  const pass=s?.scanPass||1;
+  let best=null;
+  for(let i=labelCameraCaptures.length-1;i>=0;i--){
+    const cap=labelCameraCaptures[i],cl=cap?.mapLayout||cap?.previewLayout;if(!cl)continue;
+    const other=labelCameraLayoutCenter(cl);if(!Number.isFinite(other))continue;
+    let dist;
+    if(pass===2&&s?.pass1MapWidth){
+      const mapW=Math.max(1,s.pass1MapWidth),a=((center%mapW)+mapW)%mapW,b=((other%mapW)+mapW)%mapW;
+      const linear=Math.abs(a-b);dist=Math.min(linear,mapW-linear);
+    }else dist=Math.abs(center-other);
+    if(dist<=radius){best={index:i,capture:cap,distance:dist};break;}
+  }
+  return best;
+}
 function labelCameraMapCandidateFrame(map,x,frame){
   if(!map||!frame?.canvas?.width||!frame?.canvas?.height)return null;
   const w=Math.min(frame.canvas.width,map.width),mapW=Math.max(1,map.width),sx=((Math.round(x)%mapW)+mapW)%mapW;
@@ -2430,7 +2495,7 @@ function beginLabelCameraSecondPass(frame,direction){
   s.pass1Map=snapshot.canvas;s.pass1MapWidth=snapshot.width;s.pass1MapHeight=snapshot.height;s.pass1PreviewStart=snapshot.start;s.pass1PreviewEnd=snapshot.end;s.pass1Complete=true;
   labelCameraNormalizePass1Layouts(snapshot);labelCameraRebuildCoverage();
   s.previewPanorama=snapshot.canvas;s.previewStartX=0;s.previewEndX=snapshot.width;s.previewAnchor=frame;s.previewFrameCount=Math.max(1,s.previewFrameCount||1);s.previewAdvance=0;
-  s.scanPass=2;s.pass2StartReference=frame;s.firstLoopLiveReferenceFrame=frame;s.loopStartSequence=[frame];s.loopStartBankUntil=(s.previewFrameCount||0)+10;s.pass2Travel=0;s.pass2MapX=0;s.pass2MatchedX=0;s.pass2MapScore=1;s.pass2MapConfidence=1;s.pass2Complete=false;s.loopHint=false;s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.liveAddsSinceCapture=0;s.motionStepHistory=[];s.captureProgress=0;s.alignScore=0;s.passTransitionUntil=performance.now()+1800;
+  s.scanPass=2;s.pass2StartReference=frame;s.firstLoopLiveReferenceFrame=frame;s.loopStartSequence=[frame];s.loopStartBankUntil=(s.previewFrameCount||0)+10;s.pass2Travel=0;s.pass2MapX=0;s.pass2MatchedX=0;s.pass2MapScore=1;s.pass2MapConfidence=1;s.pass2Complete=false;s.loopHint=false;s.loopCandidateFrames=0;s.loopCandidateStartX=null;s.loopCutX=null;s.liveAddsSinceCapture=0;s.motionStepHistory=[];s.captureProgress=0;s.alignScore=0;s.lastCaptureMapCenter=null;s.passTransitionUntil=performance.now()+1800;
   renderLabelCameraPreviewUi();updateLabelCameraUi();toast('Loop detected · Pass 1 mapped. Continue rotating for Pass 2 detail capture.');return true;
 }
 function labelCameraCurrentGlobalLayout(){
@@ -2757,8 +2822,11 @@ function tickLabelCamera(now=performance.now()){
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?3:2);
         const globalLayout=labelCameraCurrentGlobalLayout(),detailLayout=labelCameraDetailLayout(globalLayout),pass2Need=(st.scanPass||1)!==2||labelCameraCoverageNeedAt(detailLayout?.start||0,detailLayout?.frameWidth||detailTrackW);
+        const coverageStrength=(st.scanPass||1)===2?labelCameraCoverageStrengthAt(detailLayout?.start||0,detailLayout?.frameWidth||detailTrackW):0;
+        const spacingReady=labelCameraAutoCaptureSpacingReady(detailLayout||globalLayout);
         const mapConfident=(st.scanPass||1)!==2||(st.pass2MapConfidence||0)>=.34;
-        const ready=!st.loopHint&&pass2Need&&mapConfident&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance*.82&&motion.score>=readyScore;
+        const dynamicReadyScore=readyScore+((st.scanPass||1)===2?(coverageStrength>=.78?.04:coverageStrength>=.58?.02:coverageStrength<.38?-.02:0):0);
+        const ready=!st.loopHint&&pass2Need&&mapConfident&&spacingReady&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance*.82&&motion.score>=dynamicReadyScore;
         // v1.6.34: HQ watchdog. If the live panorama has clearly advanced for a while
         // but the classic alignment gate never fully opens, still request another HQ
         // keyframe once we have enough genuinely new live coverage and a stable frame.
@@ -2766,12 +2834,13 @@ function tickLabelCamera(now=performance.now()){
         const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?6:5);
         const watchdogCoverage=st.previewAdvance>=watchdogDistance||watchdogAdds;
         const watchdogStable=motion.score>=(narrow?.43:.45)&&referenceIdentity<(narrow?.944:.972);
-        const watchdogReady=!st.loopHint&&pass2Need&&mapConfident&&changedEnough&&watchdogCoverage&&watchdogStable;
+        const watchdogReady=!st.loopHint&&pass2Need&&mapConfident&&spacingReady&&changedEnough&&watchdogCoverage&&watchdogStable;
         // Dense ingredients/instructions text should not starve HQ capture forever.
         // If we have clearly moved for a while without a keyframe, allow a safety
         // capture and let the map place it later.
         const starvationTravel=Math.max(captureDistance*1.25,Math.round(motion.frameWidth*(narrow?.82:.74)));
-        const starvationReady=!st.loopHint&&changedEnough&&(st.previewAdvance>=starvationTravel*.92||(st.liveAddsSinceCapture||0)>=(narrow?8:7))&&motion.score>=(narrow?.41:.44)&&recentRealMotion;
+        const starvationWeak=(st.scanPass||1)!==2||coverageStrength<.52;
+        const starvationReady=!st.loopHint&&spacingReady&&starvationWeak&&changedEnough&&(st.previewAdvance>=starvationTravel*.92||(st.liveAddsSinceCapture||0)>=(narrow?8:7))&&motion.score>=(narrow?.41:.44)&&recentRealMotion;
         const normalCooldown=narrow?1150:850,watchdogCooldown=narrow?1650:1350,starvationCooldown=narrow?2300:1900;
         if(st.auto&&!labelCameraWorking&&((ready&&now-st.lastCaptureAt>normalCooldown)||(watchdogReady&&now-st.lastCaptureAt>watchdogCooldown)||(starvationReady&&now-st.lastCaptureAt>starvationCooldown))){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
@@ -2898,6 +2967,17 @@ async function captureLabelCamera(fromAuto=false){
       st.loopStartSequence=[st.firstLoopLiveReferenceFrame];
       st.loopStartBankUntil=(st.previewFrameCount||0)+10;
     }
+    const nearbyAuto=fromAuto&&record.mapLayout?labelCameraFindNearbyCapture(record.mapLayout):null;
+    if(nearbyAuto){
+      const nearbyCapture=nearbyAuto.capture,existingRank=labelCameraQualityRank(nearbyCapture),newRank=labelCameraQualityRank(record);
+      const nearbyCoverage=(record.capturePass||1)===2?labelCameraCoverageStrengthAt(record.mapLayout.start,record.mapLayout.frameWidth):0;
+      const allowBecauseWeak=(record.capturePass||1)===2&&nearbyCoverage<.46;
+      if(!allowBecauseWeak&&newRank<=existingRank+.05){
+        if(st){st.lastCaptureAt=performance.now()-300;st.previewAdvance=Math.min(st.previewAdvance||0,Math.max(0,(st.previewAdvance||0)*.30));st.captureProgress=clamp(st.previewAdvance/Math.max(1,(trackingFrame?.canvas?.width||record.mapLayout.frameWidth||1)*LABEL_CAMERA_DETAIL_RATIO*LABEL_CAMERA_DETAIL_STRIDE),0,1);st.alignScore=st.captureProgress;st.liveAddsSinceCapture=Math.min(st.liveAddsSinceCapture||0,1);}
+        toast('Skipped a near-duplicate HQ frame. Move to the next section.');
+        return;
+      }
+    }
     record.trackingFrame=hqTrackingFrame||null;
     labelCameraCaptures.push(record);labelCameraSessionCount++;$('labelCameraCount').textContent=String(labelCameraSessionCount);renderLabelCameraPreviewUi();
     if(labelCameraGuideState){
@@ -2909,6 +2989,7 @@ async function captureLabelCamera(fromAuto=false){
       // interrupt or replace the continuous low-resolution motion chain. The HQ frame
       // is stored for output/loop confidence, while the live frame remains the tracker.
       current.lastCaptureReferenceFrame=trackingFrame||current.previewAnchor;
+      current.lastCaptureMapCenter=labelCameraLayoutCenter(record.mapLayout||record.previewLayout);
       current.prevStrip=null;
       current.ghostVersion++;
       if(hqGhost)current.ghostPreview=hqGhost;
