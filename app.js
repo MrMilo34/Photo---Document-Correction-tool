@@ -87,6 +87,9 @@ const LABEL_CAMERA_ASSIST_Y = .025;
 const LABEL_CAMERA_GHOST_RATIO = .24;
 const LABEL_CAMERA_GHOST_INSET = .045;
 const LABEL_CAMERA_PASS_BINS = 36;
+const LABEL_CAMERA_DETAIL_RATIO = .50;
+const LABEL_CAMERA_DETAIL_EDGE = (1-LABEL_CAMERA_DETAIL_RATIO)/2;
+const LABEL_CAMERA_DETAIL_STRIDE = .185; // narrow-test stride applied to the central detail zone
 
 
 let points = [];
@@ -2278,21 +2281,34 @@ function labelCameraSnapshotActivePreview(){
   out.getContext('2d',{alpha:false}).drawImage(s.previewPanorama,sx,0,sw,s.previewPanorama.height,0,0,sw,s.previewPanorama.height);
   return {canvas:out,start:sx,end:ex,width:sw,height:out.height};
 }
+
+function labelCameraDetailLayout(layout){
+  if(!layout||!Number.isFinite(layout.start))return null;
+  const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
+  const detailW=Math.max(1,frameW*LABEL_CAMERA_DETAIL_RATIO);
+  const start=Number(layout.start)+frameW*LABEL_CAMERA_DETAIL_EDGE;
+  return {start,end:start+detailW,frameWidth:detailW,trackingFrameWidth:frameW,direction:layout.direction||null,pass:layout.pass||1,mapScore:layout.mapScore||0};
+}
+
 function labelCameraNormalizePass1Layouts(snapshot){
   if(!snapshot)return;
   for(const cap of labelCameraCaptures){
     if((cap.capturePass||1)!==1)continue;
     const l=cap.previewLayout;if(!l||!Number.isFinite(l.start))continue;
-    cap.mapLayout={start:l.start-snapshot.start,end:l.end-snapshot.start,frameWidth:l.frameWidth,direction:l.direction||cap.direction||null,pass:1};
+    cap.mapLayout=labelCameraDetailLayout({start:l.start-snapshot.start,end:l.end-snapshot.start,frameWidth:l.frameWidth,direction:l.direction||cap.direction||null,pass:1});
   }
 }
 function labelCameraMarkCoverage(layout,weight=1){
   const s=labelCameraGuideState;if(!s?.pass1MapWidth||!layout||!Number.isFinite(layout.start))return;
   const bins=s.hqCoverageBins||(s.hqCoverageBins=new Array(LABEL_CAMERA_PASS_BINS).fill(0));
   const frameW=Math.max(1,Number(layout.frameWidth)||Math.max(1,Number(layout.end)-Number(layout.start))||1);
-  const center=Number(layout.start)+frameW/2,radius=frameW*.48;
+  const center=Number(layout.start)+frameW/2,radius=frameW*.50;
   for(let i=0;i<bins.length;i++){
-    const x=(i+.5)/bins.length*s.pass1MapWidth,dist=Math.abs(x-center),score=dist<=radius?weight*(1-dist/Math.max(1,radius)):.0;
+    const x=(i+.5)/bins.length*s.pass1MapWidth,dist=Math.abs(x-center);
+    // The central HQ slice is the useful detail area. Keep its heat high and taper only
+    // near the slice edges rather than pretending the whole tracking frame was photographed.
+    const u=dist/Math.max(1,radius);
+    const score=u<=1?weight*(u<=.72?1:clamp((1-u)/.28,0,1)):.0;
     bins[i]=Math.max(bins[i]||0,score);
   }
 }
@@ -2500,6 +2516,16 @@ function drawLabelCameraOverlay(){
     ctx.restore();
   }
 
+  // Central detail heat zone: the full blue box is used for mapping/rotation context,
+  // while only the middle 50% is treated as the high-value HQ detail slice.
+  const hotLeft=left+(right-left)*LABEL_CAMERA_DETAIL_EDGE,hotRight=right-(right-left)*LABEL_CAMERA_DETAIL_EDGE;
+  ctx.save();
+  const hg=ctx.createLinearGradient(hotLeft,0,hotRight,0);
+  hg.addColorStop(0,'rgba(255,79,227,.025)');hg.addColorStop(.18,'rgba(53,207,255,.075)');hg.addColorStop(.5,'rgba(53,207,255,.10)');hg.addColorStop(.82,'rgba(53,207,255,.075)');hg.addColorStop(1,'rgba(255,79,227,.025)');
+  ctx.fillStyle=hg;ctx.fillRect(hotLeft,top,Math.max(1,hotRight-hotLeft),bottom-top);
+  ctx.setLineDash([5,5]);ctx.strokeStyle='rgba(125,229,255,.22)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(hotLeft,top);ctx.lineTo(hotLeft,bottom);ctx.moveTo(hotRight,top);ctx.lineTo(hotRight,bottom);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+
   // The capture box remains only as a framing guide for the NEW live section. There is
   // intentionally no visible overlap strip, seam target, center line, or alignment text.
   ctx.save();
@@ -2538,14 +2564,16 @@ function labelCameraSourceCrop(padX=.05,padY=.035){
 function labelCameraCaptureGeometry(){
   const b=labelCameraGuideBoundsNormalized(),w=b.right-b.left,h=b.bottom-b.top;
   const core=labelCameraDisplayRectToVideoSource(b.left,b.top,b.right,b.bottom);
+  const detailLeft=b.left+w*LABEL_CAMERA_DETAIL_EDGE,detailRight=b.right-w*LABEL_CAMERA_DETAIL_EDGE;
+  const detail=labelCameraDisplayRectToVideoSource(detailLeft,b.top,detailRight,b.bottom);
   const assist=labelCameraDisplayRectToVideoSource(
     clamp(b.left-w*LABEL_CAMERA_ASSIST_X,0,1),
     clamp(b.top-h*LABEL_CAMERA_ASSIST_Y,0,1),
     clamp(b.right+w*LABEL_CAMERA_ASSIST_X,0,1),
     clamp(b.bottom+h*LABEL_CAMERA_ASSIST_Y,0,1)
   );
-  if(!core||!assist)return null;
-  return {core,assist};
+  if(!core||!detail||!assist)return null;
+  return {core,detail,assist};
 }
 function labelCameraRectNorm(rect,video){
   return {
@@ -2633,21 +2661,21 @@ function tickLabelCamera(now=performance.now()){
       st.lastPreviewAt=now;const motion=advanceLabelCameraPreviewFromLive();
       if(motion){
         const narrow=motion.narrow||motion.frameAspect<.68;
-        const captureDistance=Math.max(narrow?9:8,motion.frameWidth*(narrow?.185:.145));
+        const detailTrackW=motion.frameWidth*LABEL_CAMERA_DETAIL_RATIO,captureDistance=Math.max(7,detailTrackW*LABEL_CAMERA_DETAIL_STRIDE);
         st.captureProgress=clamp(st.previewAdvance/captureDistance,0,1);st.alignScore=st.captureProgress;
         const readyScore=narrow?.55:.55;
         const referenceIdentity=st.lastCaptureReferenceFrame?labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,motion.frame):0;
         const changedEnough=!st.lastCaptureReferenceFrame||referenceIdentity<(narrow?.920:.955);
         const recentRealMotion=motion.appended&&(now-(st.lastAcceptedMotionAt||0)<650);
         const enoughAdds=(st.liveAddsSinceCapture||0)>=(narrow?4:3);
-        const globalLayout=labelCameraCurrentGlobalLayout(),pass2Need=(st.scanPass||1)!==2||labelCameraCoverageNeedAt(globalLayout?.start||0,globalLayout?.frameWidth||motion.frameWidth);
+        const globalLayout=labelCameraCurrentGlobalLayout(),detailLayout=labelCameraDetailLayout(globalLayout),pass2Need=(st.scanPass||1)!==2||labelCameraCoverageNeedAt(detailLayout?.start||0,detailLayout?.frameWidth||detailTrackW);
         const mapConfident=(st.scanPass||1)!==2||(st.pass2MapConfidence||0)>=.34;
         const ready=!st.loopHint&&pass2Need&&mapConfident&&recentRealMotion&&changedEnough&&enoughAdds&&st.previewAdvance>=captureDistance&&motion.score>=readyScore;
         // v1.6.34: HQ watchdog. If the live panorama has clearly advanced for a while
         // but the classic alignment gate never fully opens, still request another HQ
         // keyframe once we have enough genuinely new live coverage and a stable frame.
-        const watchdogDistance=Math.max(narrow?Math.round(motion.frameWidth*.72):Math.round(motion.frameWidth*.66),captureDistance*.78);
-        const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?7:6);
+        const watchdogDistance=Math.max(Math.round(detailTrackW*.78),captureDistance*.80);
+        const watchdogAdds=(st.liveAddsSinceCapture||0)>=(narrow?6:5);
         const watchdogCoverage=st.previewAdvance>=watchdogDistance||watchdogAdds;
         const watchdogStable=motion.score>=(narrow?.49:.50)&&referenceIdentity<(narrow?.935:.958);
         const watchdogReady=!st.loopHint&&pass2Need&&mapConfident&&changedEnough&&watchdogCoverage&&watchdogStable;
@@ -2656,7 +2684,7 @@ function tickLabelCamera(now=performance.now()){
         // capture and let the map place it later.
         const starvationTravel=Math.max(captureDistance*1.25,Math.round(motion.frameWidth*(narrow?.82:.74)));
         const starvationReady=!st.loopHint&&changedEnough&&(st.previewAdvance>=starvationTravel||(st.liveAddsSinceCapture||0)>=(narrow?9:8))&&motion.score>=(narrow?.43:.46)&&recentRealMotion;
-        const normalCooldown=narrow?1650:1200,watchdogCooldown=narrow?2400:1900,starvationCooldown=narrow?3100:2600;
+        const normalCooldown=narrow?1450:1050,watchdogCooldown=narrow?2100:1700,starvationCooldown=narrow?2800:2350;
         if(st.auto&&!labelCameraWorking&&((ready&&now-st.lastCaptureAt>normalCooldown)||(watchdogReady&&now-st.lastCaptureAt>watchdogCooldown)||(starvationReady&&now-st.lastCaptureAt>starvationCooldown))){
           st.captureProgress=1;updateLabelCameraUi();captureLabelCamera(true);st.peakScore=0;st.previousScore=0;st.scoreDropFrames=0;st.peakNewRatio=0;
         }
@@ -2698,18 +2726,19 @@ async function prepareLabelCameraPhotoSettings(){
   }catch(err){console.warn('Photo capability check unavailable',err);}
 }
 async function captureLabelCameraHighResRecord(video,geometry){
-  const core=geometry?.core,assist=geometry?.assist;if(!core||!assist)return null;
-  const coreNorm=labelCameraRectNorm(core,video),assistNorm=labelCameraRectNorm(assist,video);
+  const core=geometry?.core,detail=geometry?.detail,assist=geometry?.assist;if(!core||!detail||!assist)return null;
+  const coreNorm=labelCameraRectNorm(core,video),detailNorm=labelCameraRectNorm(detail,video),assistNorm=labelCameraRectNorm(assist,video);
   if(labelCameraImageCapture){
-    try{const blob=await labelCameraImageCapture.takePhoto(labelCameraPhotoSettings||{});if(blob)return {blob,coreNorm,assistNorm,highRes:true};}catch(err){console.warn('Medium-resolution still capture unavailable',err);}
+    try{const blob=await labelCameraImageCapture.takePhoto(labelCameraPhotoSettings||{});if(blob)return {blob,coreNorm,detailNorm,assistNorm,highRes:true};}catch(err){console.warn('Medium-resolution still capture unavailable',err);}
     try{
-      const bitmap=await labelCameraImageCapture.grabFrame();if(bitmap){const c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;c.getContext('2d').drawImage(bitmap,0,0);bitmap.close?.();const blob=await canvasBlob(c,'image/jpeg',.95);if(blob)return {blob,coreNorm,assistNorm,highRes:false};}
+      const bitmap=await labelCameraImageCapture.grabFrame();if(bitmap){const c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;c.getContext('2d').drawImage(bitmap,0,0);bitmap.close?.();const blob=await canvasBlob(c,'image/jpeg',.95);if(blob)return {blob,coreNorm,detailNorm,assistNorm,highRes:false};}
     }catch(err){console.warn('Frame capture fallback unavailable',err);}
   }
   const c=document.createElement('canvas'),maxEdge=1800,scale=Math.min(1,maxEdge/Math.max(assist.sw,assist.sh));c.width=Math.max(1,Math.round(assist.sw*scale));c.height=Math.max(1,Math.round(assist.sh*scale));c.getContext('2d').drawImage(video,assist.sx,assist.sy,assist.sw,assist.sh,0,0,c.width,c.height);
   const blob=await canvasBlob(c,'image/jpeg',.96);
   const coreWithinAssist={x:clamp((core.sx-assist.sx)/assist.sw,0,1),y:clamp((core.sy-assist.sy)/assist.sh,0,1),w:clamp(core.sw/assist.sw,.001,1),h:clamp(core.sh/assist.sh,.001,1)};
-  return blob?{blob,coreWithinAssist,highRes:false}:null;
+  const detailWithinAssist={x:clamp((detail.sx-assist.sx)/assist.sw,0,1),y:clamp((detail.sy-assist.sy)/assist.sh,0,1),w:clamp(detail.sw/assist.sw,.001,1),h:clamp(detail.sh/assist.sh,.001,1)};
+  return blob?{blob,coreWithinAssist,detailWithinAssist,highRes:false}:null;
 }
 async function startLabelCamera(){
   closeLabelAddDialog(); stopHomeCameraBg();
@@ -2740,7 +2769,7 @@ async function captureLabelCamera(fromAuto=false){
   // autofocus noise, Auto Capture may not save another HQ frame of the same view.
   if(fromAuto&&st?.loopHint){st.previewAdvance=0;st.captureProgress=0;st.alignScore=0;updateLabelCameraUi();return;}
   if(fromAuto&&st?.lastCaptureReferenceFrame&&trackingFrame){
-    const globalForDup=labelCameraCurrentGlobalLayout(),allowDuplicateForGap=(st?.scanPass||1)===2&&labelCameraCoverageNeedAt(globalForDup?.start||0,globalForDup?.frameWidth||trackingFrame.canvas.width);
+    const globalForDup=labelCameraCurrentGlobalLayout(),detailForDup=labelCameraDetailLayout(globalForDup),allowDuplicateForGap=(st?.scanPass||1)===2&&labelCameraCoverageNeedAt(detailForDup?.start||0,detailForDup?.frameWidth||trackingFrame.canvas.width*LABEL_CAMERA_DETAIL_RATIO);
     const identity=labelCameraFrameIdentityScore(st.lastCaptureReferenceFrame,trackingFrame);
     const cutoff=trackingFrame.narrow?.928:.958;
     if(identity>=cutoff&&!allowDuplicateForGap){
@@ -2757,7 +2786,7 @@ async function captureLabelCamera(fromAuto=false){
   updateLabelCameraUi();drawLabelCameraOverlay();
   try{
     const record=await captureLabelCameraHighResRecord(video,geometry);if(!record)return;
-    record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;record.capturePass=st?.scanPass||1;record.mapLayout=globalLayout;
+    record.direction=direction;record.order=labelCameraSessionCount;record.previewLayout=previewLayout;record.capturePass=st?.scanPass||1;record.mapLayout=labelCameraDetailLayout(globalLayout);
     if(fromAuto&&trackingFrame){
       const verified=await labelCameraVerifyHqRecord(record,trackingFrame);
       if(!verified.ok){
@@ -3130,7 +3159,7 @@ async function stitchLabelCameraCapturesFromPreview(captures,liveReference=null)
   for(let i=0;i<captures.length;i++){
     const capture=captures[i],layout=capture?.mapLayout||capture?.previewLayout;
     if(!layout||!Number.isFinite(layout.start)||!Number.isFinite(layout.frameWidth)||layout.frameWidth<=0)return null;
-    const piece=await labelCameraCaptureToCanvas(capture,{maxEdge:3200,mode:'core'});
+    const piece=await labelCameraCaptureToCanvas(capture,{maxEdge:3200,mode:'detail'});
     entries.push({capture,piece,layout,index:i});
     await new Promise(r=>setTimeout(r,0));
   }
@@ -3198,17 +3227,21 @@ async function stitchLabelCameraCapturesFromPreview(captures,liveReference=null)
 async function labelCameraCaptureToCanvas(capture,options={}){
   const blob=capture?.blob||capture;if(!(blob instanceof Blob))throw new Error('Invalid panoramic capture');
   const bitmap=await createImageBitmap(blob);try{
-    let ax=0,ay=0,aw=bitmap.width,ah=bitmap.height,coreRel={x:0,y:0,w:1,h:1};
+    let ax=0,ay=0,aw=bitmap.width,ah=bitmap.height,coreRel={x:0,y:0,w:1,h:1},detailRel=null;
     if(capture?.assistNorm){
       const n=capture.assistNorm;ax=clamp(Math.round(n.x*bitmap.width),0,bitmap.width-1);ay=clamp(Math.round(n.y*bitmap.height),0,bitmap.height-1);aw=clamp(Math.round(n.w*bitmap.width),1,bitmap.width-ax);ah=clamp(Math.round(n.h*bitmap.height),1,bitmap.height-ay);
       const cn=capture.coreNorm||n;coreRel={x:clamp((cn.x-n.x)/n.w,0,1),y:clamp((cn.y-n.y)/n.h,0,1),w:clamp(cn.w/n.w,.001,1),h:clamp(cn.h/n.h,.001,1)};
-    }else if(capture?.coreWithinAssist){coreRel=capture.coreWithinAssist;}
+      const dn=capture.detailNorm;if(dn)detailRel={x:clamp((dn.x-n.x)/n.w,0,1),y:clamp((dn.y-n.y)/n.h,0,1),w:clamp(dn.w/n.w,.001,1),h:clamp(dn.h/n.h,.001,1)};
+    }else if(capture?.coreWithinAssist){coreRel=capture.coreWithinAssist;detailRel=capture.detailWithinAssist||null;}
     const maxEdge=options.maxEdge||3200,scale=Math.min(1,maxEdge/Math.max(aw,ah)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(aw*scale));c.height=Math.max(1,Math.round(ah*scale));c.getContext('2d').drawImage(bitmap,ax,ay,aw,ah,0,0,c.width,c.height);
     const coreRect={x:coreRel.x*c.width,y:coreRel.y*c.height,w:coreRel.w*c.width,h:coreRel.h*c.height};
-    if(options.mode==='core'){
-      const out=document.createElement('canvas');out.width=Math.max(1,Math.round(coreRect.w));out.height=Math.max(1,Math.round(coreRect.h));out.getContext('2d').drawImage(c,coreRect.x,coreRect.y,coreRect.w,coreRect.h,0,0,out.width,out.height);return options.withMeta?{canvas:out,coreRect:{x:0,y:0,w:out.width,h:out.height}}:out;
+    const fallbackDetail={x:coreRect.x+coreRect.w*LABEL_CAMERA_DETAIL_EDGE,y:coreRect.y,w:coreRect.w*LABEL_CAMERA_DETAIL_RATIO,h:coreRect.h};
+    const detailRect=detailRel?{x:detailRel.x*c.width,y:detailRel.y*c.height,w:detailRel.w*c.width,h:detailRel.h*c.height}:fallbackDetail;
+    const cropRect=options.mode==='detail'?detailRect:coreRect;
+    if(options.mode==='core'||options.mode==='detail'){
+      const out=document.createElement('canvas');out.width=Math.max(1,Math.round(cropRect.w));out.height=Math.max(1,Math.round(cropRect.h));out.getContext('2d').drawImage(c,cropRect.x,cropRect.y,cropRect.w,cropRect.h,0,0,out.width,out.height);return options.withMeta?{canvas:out,coreRect:{x:0,y:0,w:out.width,h:out.height}}:out;
     }
-    return options.withMeta?{canvas:c,coreRect}:c;
+    return options.withMeta?{canvas:c,coreRect,detailRect}:c;
   }finally{bitmap.close?.();}
 }
 
@@ -3230,7 +3263,7 @@ async function finalizeLabelCameraSession(){
       const pieces=[];
       for(let i=0;i<captures.length;i++){
         $('busyText').textContent=`Preparing fallback section · ${i+1}/${captures.length}`;
-        pieces.push(await labelCameraCaptureToCanvas(captures[i],{maxEdge:3200,mode:'core'}));
+        pieces.push(await labelCameraCaptureToCanvas(captures[i],{maxEdge:3200,mode:'detail'}));
         await new Promise(r=>setTimeout(r,0));
       }
       $('busyText').textContent='Matching fallback overlaps & blending seams…';
